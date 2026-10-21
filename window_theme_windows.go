@@ -33,6 +33,8 @@ var (
 	getDC                = menuUser.NewProc("GetDC")
 	releaseDC            = menuUser.NewProc("ReleaseDC")
 	fillRect             = menuUser.NewProc("FillRect")
+	createRoundRect      = menuGDI.NewProc("CreateRoundRectRgn")
+	dwmSetAttribute      = syscall.NewLazyDLL("dwmapi.dll").NewProc("DwmSetWindowAttribute")
 	drawText             = menuUser.NewProc("DrawTextW")
 	createBrush          = menuGDI.NewProc("CreateSolidBrush")
 	deleteObject         = menuGDI.NewProc("DeleteObject")
@@ -84,6 +86,7 @@ type windowMenuTheme struct {
 	font, background uintptr
 	dpi              int32
 	color            ui.Color
+	backdrops        map[uintptr]*menuBackdrop
 }
 
 func installWindowTheme(w *mygo.Window, theme func() *ui.Theme) {
@@ -139,6 +142,14 @@ func menuWindowProc(hwnd, msg, wp, lp, id, ref uintptr) uintptr {
 			r, _, _ := defSubclassProc.Call(hwnd, msg, wp, lp)
 			if lp>>16 == 0 {
 				s.prepare(hwnd, wp)
+				if s.theme().Background.A < 255 {
+					if s.backdrops == nil {
+						s.backdrops = map[uintptr]*menuBackdrop{}
+					}
+					if _, captured := s.backdrops[wp]; !captured {
+						s.backdrops[wp] = captureMenuBackdrop(max(1, int(s.px(6))/4))
+					}
+				}
 			} // Leave the OS system menu alone.
 			return r
 		case 0x002c: // WM_MEASUREITEM
@@ -161,8 +172,13 @@ func menuWindowProc(hwnd, msg, wp, lp, id, ref uintptr) uintptr {
 			if r := s.mnemonic(lp, rune(wp&0xffff)); r != 0 {
 				return r
 			}
+		case 0x0121: // WM_ENTERIDLE: the popup HWND now exists, including submenus.
+			if wp == 2 && lp != 0 { // MSGF_MENU
+				s.stylePopup(lp)
+			}
 		case 0x0212: // WM_EXITMENULOOP; native popup handles are ephemeral.
 			clear(s.items)
+			clear(s.backdrops)
 		case 0x0082: // WM_NCDESTROY
 			removeWindowSubclass.Call(hwnd, menuSubclass, id)
 			deleteObject.Call(s.font)
@@ -174,7 +190,30 @@ func menuWindowProc(hwnd, msg, wp, lp, id, ref uintptr) uintptr {
 	return r
 }
 
-func colorRef(c ui.Color) uintptr           { return uintptr(c.R) | uintptr(c.G)<<8 | uintptr(c.B)<<16 }
+func colorRef(c ui.Color) uintptr { return uintptr(c.R) | uintptr(c.G)<<8 | uintptr(c.B)<<16 }
+func menuSurface(t *ui.Theme) ui.Color {
+	return surface(t)
+}
+
+func (s *windowMenuTheme) stylePopup(hwnd uintptr) {
+	var name [32]uint16
+	menuUser.NewProc("GetClassNameW").Call(hwnd, uintptr(unsafe.Pointer(&name[0])), uintptr(len(name)))
+	if syscall.UTF16ToString(name[:]) != "#32768" {
+		return
+	}
+	// Preserve the native shadow and hit testing; DWM applies its supported
+	// rounded popup policy on Windows 11 and safely declines on older systems.
+	corner := uint32(2) // DWMWCP_ROUND
+	dwmSetAttribute.Call(hwnd, 33, uintptr(unsafe.Pointer(&corner)), 4)
+	dark := uint32(0)
+	if s.theme().Dark {
+		dark = 1
+	}
+	dwmSetAttribute.Call(hwnd, 20, uintptr(unsafe.Pointer(&dark)), 4)
+	border := uint32(colorRef(s.theme().Border))
+	dwmSetAttribute.Call(hwnd, 34, uintptr(unsafe.Pointer(&border)), 4)
+}
+
 func (s *windowMenuTheme) px(n int32) int32 { return (n*s.dpi + 48) / 96 }
 func (s *windowMenuTheme) prepare(hwnd, menu uintptr) {
 	dpi, _, _ := getWindowDPI.Call(hwnd)
@@ -189,10 +228,11 @@ func (s *windowMenuTheme) prepare(hwnd, menu uintptr) {
 		s.font, _, _ = createFont.Call(uintptr(height), 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0,
 			uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(t.Font))))
 	}
-	if s.background == 0 || s.color != t.Background {
+	bg := menuSurface(t)
+	if s.background == 0 || s.color != bg {
 		deleteObject.Call(s.background)
-		s.color = t.Background
-		s.background, _, _ = createBrush.Call(colorRef(t.Background))
+		s.color = bg
+		s.background, _, _ = createBrush.Call(colorRef(bg))
 	}
 	mi := menuInfo{Mask: 2, Background: s.background} // MIM_BACKGROUND
 	mi.Size = uint32(unsafe.Sizeof(mi))
@@ -236,7 +276,7 @@ func (s *windowMenuTheme) measure(hwnd uintptr, m *menuMeasure, item themedMenuI
 		menuText(dc, parts[1], &r, 0x400|0x20)
 		width += r.Right + s.px(28)
 	}
-	m.Width, m.Height = uint32(max(s.px(160), width)), uint32(s.px(32))
+	m.Width, m.Height = uint32(max(s.px(160), width)), uint32(s.px(34))
 	selectObject.Call(dc, old)
 	releaseDC.Call(hwnd, dc)
 }
@@ -247,14 +287,14 @@ func paintMenuRect(dc uintptr, r menuRect, c ui.Color) {
 }
 func (s *windowMenuTheme) draw(d *menuDraw, item themedMenuItem) {
 	t := s.theme()
-	bg, fg := t.Background, t.Text
-	if d.State&(0x1|0x40) != 0 {
-		bg, fg = t.Accent, t.AccentText
+	bg, fg := menuSurface(t), t.Text
+	disabled := d.State&(0x2|0x4) != 0
+	selected := d.State&(0x1|0x40) != 0 && !disabled
+	if disabled {
+		fg = t.TextMuted.Mix(bg, .35)
 	}
-	if d.State&(0x2|0x4) != 0 {
-		fg = fg.Mix(bg, .45)
-	}
-	paintMenuRect(d.DC, d.Rect, bg)
+	backdrop := s.backdrops[d.Window]
+	paintMenuBackdrop(d.DC, d.Rect, bg, backdrop)
 	r := d.Rect
 	if item.kind&0x800 != 0 {
 		r.Left += s.px(12)
@@ -264,6 +304,26 @@ func (s *windowMenuTheme) draw(d *menuDraw, item themedMenuItem) {
 		paintMenuRect(d.DC, r, t.Border)
 		return
 	}
+	if selected {
+		amount := float32(.10)
+		if t.Dark {
+			amount = .18
+		}
+		r.Left += s.px(4)
+		r.Right -= s.px(4)
+		r.Top += s.px(2)
+		r.Bottom -= s.px(2)
+		radius := s.px(int32(t.Radius))
+		region, _, _ := createRoundRect.Call(uintptr(r.Left), uintptr(r.Top), uintptr(r.Right+1), uintptr(r.Bottom+1), uintptr(radius*2), uintptr(radius*2))
+		saved, _, _ := menuGDI.NewProc("SaveDC").Call(d.DC)
+		menuGDI.NewProc("ExtSelectClipRgn").Call(d.DC, region, 1) // RGN_AND: retain the native clip.
+		highlight := bg.Mix(t.Accent, amount)
+		highlight.A = bg.A
+		paintMenuBackdrop(d.DC, r, highlight, backdrop)
+		menuGDI.NewProc("RestoreDC").Call(d.DC, saved)
+		deleteObject.Call(region)
+	}
+	r = d.Rect
 	old, _, _ := selectObject.Call(d.DC, s.font)
 	mode, _, _ := setBGMode.Call(d.DC, 1)
 	color, _, _ := setTextColor.Call(d.DC, colorRef(fg))
@@ -276,9 +336,16 @@ func (s *windowMenuTheme) draw(d *menuDraw, item themedMenuItem) {
 	parts := strings.SplitN(item.label, "\t", 2)
 	menuText(d.DC, parts[0], &r, flags)
 	if len(parts) == 2 {
+		if !disabled {
+			setTextColor.Call(d.DC, colorRef(t.TextMuted))
+		}
 		menuText(d.DC, parts[1], &r, flags|2)
+		setTextColor.Call(d.DC, colorRef(fg))
 	}
 	if d.State&8 != 0 {
+		if !disabled {
+			setTextColor.Call(d.DC, colorRef(t.Accent))
+		}
 		r = d.Rect
 		r.Right = r.Left + s.px(28)
 		mark := "✓"
@@ -286,6 +353,7 @@ func (s *windowMenuTheme) draw(d *menuDraw, item themedMenuItem) {
 			mark = "•"
 		}
 		menuText(d.DC, mark, &r, flags|1)
+		setTextColor.Call(d.DC, colorRef(fg))
 	}
 	if item.submenu {
 		r = d.Rect

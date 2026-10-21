@@ -37,20 +37,11 @@ func safeName(s string) string {
 	return s
 }
 func (a *app) confirm(title, message string, fn func()) {
-	if a.window == nil {
-		return
+	a.confirmTitle, a.confirmMessage, a.confirmAction = title, message, fn
+	a.confirmOpen = true
+	if a.window != nil {
+		a.window.Invalidate()
 	}
-	dispatch, win := a.dispatch, a.window
-	go func() {
-		res, err := mygo.Dialog.Message(mygo.MessageOptions{Parent: win, Type: mygo.MessageQuestion, Title: title, Message: message, Buttons: []string{"Cancel", "Continue"}, DefaultButton: 0, CancelButton: 0})
-		if err == nil && res.Button == 1 {
-			dispatch(func() {
-				if !a.closed {
-					fn()
-				}
-			})
-		}
-	}()
 }
 func (a *app) saveFile(name string, data []byte) {
 	dispatch, win := a.dispatch, a.window
@@ -170,7 +161,8 @@ func (a *app) restore() {
 					a.run("Backup restored", func() error { return s.Restore(path) }, func(err error) {
 						if err == nil {
 							a.prefs = a.state.Preferences
-							a.theme = workspaceTheme(a.prefs.Dark, a.prefs.Accent)
+							a.prefs.Translucency = normalizedTranslucency(a.prefs.Translucency)
+							a.theme = workspaceTheme(a.prefs.Dark, a.prefs.Accent, a.prefs.Translucency)
 							a.composers = nil
 							a.navigate("inbox")
 						}

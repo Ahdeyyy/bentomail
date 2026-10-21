@@ -28,7 +28,7 @@ func (a *app) settingsView(c *ui.Context) {
 			for _, tab := range []string{"Accounts", "Appearance", "Organization", "Contacts", "Notifications", "Storage", "Shortcuts"} {
 				b := textButton(c, tab).FontSize(11).OnClick(func() { a.settingsTab = tab })
 				if a.settingsTab == tab {
-					b.Background(t.Accent.Alpha(.12)).TextColor(t.Accent)
+					b.Background(t.Surface.Mix(t.Accent, .12)).TextColor(t.Accent)
 				}
 			}
 		})
@@ -71,7 +71,7 @@ func (a *app) accountsSettings(c *ui.Context) {
 	section(c, "Connected accounts")
 	for _, ac := range a.state.Accounts {
 		c.Key(ac.ID)
-		ui.Row(c).FillWidth().Padding(12).Gap(10).Radius(9).Background(a.theme.Background).AlignItems(ui.Center).Children(func() {
+		frost(ui.Row(c), a.theme.Background).FillWidth().Padding(12).Gap(10).Radius(9).AlignItems(ui.Center).Children(func() {
 			ui.Icon(c, icon("mail")).Size(23, 23).TextColor(a.theme.Accent)
 			ui.Column(c).Grow(1).Gap(3).Children(func() {
 				ui.Text(c, ac.Name).FontSize(12).Bold()
@@ -288,6 +288,18 @@ func (a *app) validAccount() (mailclient.Account, bool) {
 func (a *app) appearanceSettings(c *ui.Context) {
 	section(c, "Appearance")
 	ui.Checkbox(c, &a.prefs.Dark, "Dark appearance").FillWidth().OnChange(a.savePrefs)
+	ui.Column(c).FillWidth().MaxWidth(400).Gap(6).Children(func() {
+		ui.Row(c).FillWidth().Children(func() {
+			ui.Text(c, "Translucency").FontSize(11).Grow(1)
+			ui.Textf(c, "%.0f%%", a.prefs.Translucency).FontSize(11).TextColor(a.theme.TextMuted)
+		})
+		ui.StepSlider(c, &a.prefs.Translucency, 0, 100, 5).Label("Translucency level").FillWidth().OnChange(a.savePrefs)
+		ui.Row(c).FillWidth().Children(func() {
+			ui.Text(c, "Opaque").FontSize(10).TextColor(a.theme.TextMuted).Grow(1)
+			ui.Text(c, "Frosted").FontSize(10).TextColor(a.theme.TextMuted)
+		})
+	})
+	note(c, "Adjust the frosted background. Changes apply immediately and are saved automatically. Background blur follows system transparency settings; unsupported systems use a solid background.")
 	ui.Text(c, "Accent color").FontSize(11)
 	ui.Select(c, &a.prefs.Accent, []string{"Indigo", "Teal", "Rose", "Amber", "Violet"}).Label("Accent color").Width(240).OnChange(a.savePrefs)
 	ui.Text(c, "Message density").FontSize(11)

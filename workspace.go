@@ -12,7 +12,7 @@ import (
 )
 
 func (a *app) view(c *ui.Context) {
-	c.SetTheme(a.theme)
+	setWindowTheme(c, a.theme)
 	c.OnShortcut(ui.Ctrl, ui.KeyN, func() { a.newComposer(nil, "new") })
 	c.OnShortcut(ui.Ctrl, ui.KeyF, func() { a.searchHandle.Focus(c) })
 	c.OnShortcut(ui.Ctrl, ui.KeyZ, func() {
@@ -20,7 +20,7 @@ func (a *app) view(c *ui.Context) {
 			a.undoAction()
 		}
 	})
-	ui.Column(c).Fill().Background(a.theme.Background).Children(func() {
+	ui.Column(c).Fill().Children(func() {
 		ui.Row(c).Grow(1).FillWidth().Children(func() {
 			ui.Split(c, &a.prefs.SidebarWidth, func() { a.sidebar(c) }, func() {
 				ui.Column(c).Fill().Children(func() {
@@ -43,7 +43,7 @@ func (a *app) view(c *ui.Context) {
 				})
 			}).Fill()
 		})
-		ui.Row(c).Height(28).Shrink(0).FillWidth().Padding(0, 16).Gap(8).AlignItems(ui.Center).Background(surface(a.theme)).BorderWidth(1, 0, 0, 0).BorderColor(a.theme.Border).Children(func() {
+		frost(ui.Row(c), surface(a.theme)).Height(28).Shrink(0).FillWidth().Padding(0, 16).Gap(8).AlignItems(ui.Center).BorderWidth(1, 0, 0, 0).BorderColor(a.theme.Border).Children(func() {
 			color := a.theme.Success
 			if a.statusError {
 				color = a.theme.Danger
@@ -56,6 +56,7 @@ func (a *app) view(c *ui.Context) {
 			ui.Text(c, "LOCAL STORAGE").FontSize(9).TextColor(a.theme.TextMuted)
 		})
 	})
+	a.confirmationDialog(c)
 }
 func (a *app) sidebar(c *ui.Context) {
 	t := a.theme
@@ -135,7 +136,7 @@ func (a *app) nav(c *ui.Context, ic, label, id string, count int) {
 	t := a.theme
 	b := ui.ButtonBase(c).Label(label).FillWidth().Padding(9, 10).Gap(10).Radius(7).OnClick(func() { a.navigate(id) })
 	if sel {
-		b.Background(t.Accent.Alpha(.12)).TextColor(t.Accent)
+		b.Background(t.Surface.Mix(t.Accent, .12)).TextColor(t.Accent)
 	} else if b.Hovered() {
 		b.Background(t.SurfaceHover)
 	} else {
@@ -190,7 +191,7 @@ func (a *app) topbar(c *ui.Context) {
 			}
 			a.navigate(a.folder)
 		})
-		ui.Row(c).Grow(1).Height(38).Padding(0, 11).Gap(8).AlignItems(ui.Center).Background(surface(t)).Radius(8).Border(1, t.Border).Children(func() {
+		ui.Row(c).Grow(1).Height(38).Padding(0, 11).Gap(8).AlignItems(ui.Center).Background(t.Surface).Radius(8).Border(1, t.Border).Children(func() {
 			ui.Icon(c, icon("search")).Size(17, 17).TextColor(t.TextMuted)
 			ui.TextInput(c, &a.query).Bind(&a.searchHandle).Label("Search mail").Placeholder("Search your mail…").Grow(1).Border(0, ui.Transparent).Background(ui.Transparent).OnChange(func() { a.page = "mail"; a.selectedID = ""; a.rowIndex = -1; a.searchMail() }).OnShortcut(0, ui.KeyEscape, func() { a.query = "" })
 			if a.query != "" {
@@ -299,7 +300,7 @@ func (a *app) messageList(c *ui.Context) {
 						}
 					})
 					if a.filter == f || (a.filter == "" && f == "All") {
-						b.Background(t.Accent.Alpha(.12)).TextColor(t.Accent)
+						b.Background(t.Surface.Mix(t.Accent, .12)).TextColor(t.Accent)
 					} else {
 						b.TextColor(t.TextMuted)
 					}
@@ -343,10 +344,7 @@ func (a *app) messageList(c *ui.Context) {
 			r.ContextMenu(func(menu *ui.Menu) { a.messageMenu(menu, m) })
 			r.Children(func() {
 				if !compact {
-					avatarBG, avatarText := t.Accent.Alpha(.1), t.Accent
-					if selected {
-						avatarBG, avatarText = t.AccentText.Alpha(.12), text
-					}
+					avatarBG, avatarText := avatarColors(t, m.From)
 					ui.Box(rc).Size(32, 32).Shrink(0).Radius(11).Center().Background(avatarBG).TextColor(avatarText).Children(func() { ui.Text(rc, initials(name)).FontSize(11).Bold() })
 				}
 				ui.Column(rc).Grow(1).MinWidth(0).Gap(5).Children(func() {
@@ -472,7 +470,8 @@ func (a *app) reader(c *ui.Context) {
 			ui.Text(c, subj).FontSize(23).Bold().MaxLines(3)
 			name, address := sender(m.From)
 			ui.Row(c).FillWidth().Gap(11).AlignItems(ui.Center).Children(func() {
-				ui.Box(c).Size(38, 38).Radius(13).Background(t.Accent.Alpha(.1)).TextColor(t.Accent).Center().Children(func() { ui.Text(c, initials(name)).FontSize(13).Bold() })
+				avatarBG, avatarText := avatarColors(t, m.From)
+				ui.Box(c).Size(38, 38).Radius(13).Background(avatarBG).TextColor(avatarText).Center().Children(func() { ui.Text(c, initials(name)).FontSize(13).Bold() })
 				ui.Column(c).Grow(1).Gap(4).Children(func() {
 					ui.Text(c, name).FontSize(12).Bold()
 					ui.Text(c, address).FontSize(10).TextColor(t.TextMuted).Selectable()

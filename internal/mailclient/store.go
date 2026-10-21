@@ -75,6 +75,7 @@ func Open(dir string) (*Store, error) {
 			Templates:     make(map[string]string),
 			Folders:       make(map[string][]string),
 			Preferences: Preferences{
+				Translucency: DefaultTranslucency,
 				Density:      "Comfortable",
 				ReadingSize:  14,
 				PreviewLines: 2,

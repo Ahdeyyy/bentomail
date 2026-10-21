@@ -36,8 +36,8 @@ func (a *app) previewAttachment(at mailclient.Attachment) {
 		}
 		newAppWindow(mygo.WindowOptions{Title: at.Name + " · Bentomail", Width: 900, Height: 680, MinWidth: 400, MinHeight: 300, Content: ui.View(func(c *ui.Context) {
 			theme := a.theme
-			c.SetTheme(theme)
-			ui.Column(c).Fill().Background(theme.Background).Children(func() {
+			setWindowTheme(c, theme)
+			ui.Column(c).Fill().Children(func() {
 				windowTitlebar(c)
 				ui.Column(c).Fill().Padding(20).Gap(12).Children(func() {
 					ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {

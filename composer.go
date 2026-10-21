@@ -240,7 +240,7 @@ func (a *app) composeView(c *ui.Context) {
 				}
 				b := ui.Button(c, label).FontSize(11).OnClick(func() { a.composeID = tab.draft.ID })
 				if tab.draft.ID == co.draft.ID {
-					b.Background(t.Accent.Alpha(.15)).TextColor(t.Accent)
+					b.Background(t.Surface.Mix(t.Accent, .15)).TextColor(t.Accent)
 				}
 			}
 			iconButton(c, "plus", "New draft", func() { a.newComposer(nil, "new") })
@@ -543,7 +543,7 @@ func (a *app) draftsView(c *ui.Context) {
 				}
 				count++
 				c.Key(d.ID)
-				ui.Column(c).FillWidth().Padding(16).Gap(8).Radius(9).Background(a.theme.Background).Children(func() {
+				frost(ui.Column(c), a.theme.Background).FillWidth().Padding(16).Gap(8).Radius(9).Children(func() {
 					subj := d.Subject
 					if subj == "" {
 						subj = "(No subject)"

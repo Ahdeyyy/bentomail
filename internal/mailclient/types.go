@@ -1,6 +1,7 @@
 package mailclient
 
 import (
+	"encoding/json"
 	"time"
 )
 
@@ -110,6 +111,7 @@ type Preferences struct {
 	FullSync            bool
 	RecentDays          int
 	Dark                bool
+	Translucency        float64
 	Accent              string
 	Density             string
 	ReadingSize         int
@@ -125,6 +127,20 @@ type Preferences struct {
 	SendDelay           int
 	QuietStart          string
 	QuietEnd            string
+}
+
+const DefaultTranslucency = 65
+
+// Keep older preferences frosted by default while preserving an explicit 0
+// (opaque), including when restoring a backup.
+func (p *Preferences) UnmarshalJSON(data []byte) error {
+	type preferences Preferences
+	value := preferences{Translucency: DefaultTranslucency}
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	*p = Preferences(value)
+	return nil
 }
 
 // State represents the complete snapshot of the mail client data model.

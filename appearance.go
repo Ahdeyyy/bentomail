@@ -3,14 +3,27 @@ package main
 import (
 	_ "embed"
 	"fmt"
+	"math"
+
+	"bentomail/internal/mailclient"
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 )
 
 //go:embed resources/logo.svg
 var logoSVG []byte
 
-func workspaceTheme(dark bool, accent string) *ui.Theme {
+const panelRadius = 12
+
+func normalizedTranslucency(value float64) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return mailclient.DefaultTranslucency
+	}
+	return max(0, min(100, value))
+}
+
+func workspaceTheme(dark bool, accent string, translucency ...float64) *ui.Theme {
 	t := ui.LightTheme()
 	t.Font = "Martian Grotesk"
 	t.FontSize = 13
@@ -63,16 +76,76 @@ func workspaceTheme(dark bool, accent string) *ui.Theme {
 		t.Warning = ui.Hex("#fbbf24")
 		t.Success = ui.Hex("#4ade80")
 	}
+	level := float64(mailclient.DefaultTranslucency)
+	if len(translucency) > 0 {
+		level = normalizedTranslucency(translucency[0])
+	}
+	frost := float32(level / 100)
+	t.Background = t.Background.Alpha(1 - .85*frost)
+	// Controls retain at least 94% opacity, independently of the panes.
+	t.Surface = t.Surface.Alpha(1 - .06*frost)
 	return t
 }
 func surface(t *ui.Theme) ui.Color {
+	frost := (1 - float32(t.Background.A)/255) / .85
+	color := ui.Hex("#ffffff")
 	if t.Dark {
-		return t.Surface
+		color = t.Surface
 	}
-	return ui.Hex("#ffffff")
+	return color.Alpha(1 - .55*frost)
+}
+
+// Blur the backdrop, then tint it; text and controls remain sharp above it.
+type frostedSurface struct{ tint ui.Color }
+
+func (s frostedSurface) PaintMaterial(p *ui.Painter, box ui.Rect, radii [4]float32) {
+	glass.Blur{Radius: 10}.PaintMaterial(p, box, radii)
+	p.Fill(box, s.tint, radii[0])
+}
+
+func frost(e ui.Element, color ui.Color) ui.Element {
+	if color.A < 255 {
+		return e.Material(frostedSurface{tint: color})
+	}
+	return e.Background(color)
 }
 func panel(c *ui.Context, e ui.Element) ui.Element {
-	return e.Background(surface(c.Theme())).Radius(12).Border(1, c.Theme().Border).Clip()
+	return frost(e, surface(c.Theme())).Radius(panelRadius).Border(1, c.Theme().Border).Clip()
+}
+
+func setWindowTheme(c *ui.Context, t *ui.Theme) {
+	c.SetTheme(t)
+	if !c.Vibrancy() {
+		// Unsupported platforms and software renders retain a solid base.
+		bg := t.Background
+		bg.A = 255
+		c.Root().Background(bg)
+	}
+}
+
+func (a *app) confirmationDialog(c *ui.Context) {
+	ui.DialogBase(c.Key("confirmation"), &a.confirmOpen, func(backdrop, dialog ui.Element) {
+		backdrop.Background(ui.RGBA(0, 0, 0, .22))
+		dialog.Label(a.confirmTitle).Width(440).MaxWidth(560).Padding(24).Gap(18).
+			Radius(panelRadius).Background(surface(c.Theme())).Border(1, c.Theme().Border).
+			Shadow(0, 12, 36, 0, ui.RGBA(0, 0, 0, .2))
+		frost(dialog, surface(c.Theme()))
+		ui.Text(c, a.confirmTitle).FontSize(18).Bold().FillWidth()
+		ui.Text(c, a.confirmMessage).FontSize(13).LineHeight(1.6).FillWidth().TextColor(c.Theme().TextMuted)
+		ui.Row(c).FillWidth().Justify(ui.End).Gap(8).Children(func() {
+			textButton(c, "Cancel").AutoFocus().OnClick(func() { a.confirmOpen = false; a.confirmAction = nil })
+			ui.PrimaryButton(c, "Continue").OnClick(func() {
+				fn := a.confirmAction
+				a.confirmOpen, a.confirmAction = false, nil
+				if fn != nil {
+					fn()
+				}
+			})
+		})
+	})
+	if !a.confirmOpen {
+		a.confirmAction = nil
+	}
 }
 
 // Short control labels must keep their intrinsic width. MyGo's SingleLine
@@ -119,6 +192,8 @@ const windowTitlebarHeight = 36
 func newAppWindow(opts mygo.WindowOptions, theme func() *ui.Theme) *mygo.Window {
 	opts.TitleBarStyle = mygo.TitleBarHidden
 	opts.TitleBarHeight = windowTitlebarHeight
+	// Create with a material even at 0% so the setting can change live on Windows.
+	opts.Vibrancy = mygo.VibrancyAcrylic
 	t := theme()
 	opts.BackgroundColor = fmt.Sprintf("#%02x%02x%02x", t.Background.R, t.Background.G, t.Background.B)
 	w := mygo.NewWindow(opts)
@@ -129,8 +204,7 @@ func newAppWindow(opts mygo.WindowOptions, theme func() *ui.Theme) *mygo.Window 
 func windowTitlebar(c *ui.Context) {
 	bar := c.TitleBar()
 	ui.Row(c).Label("Window titlebar").Height(max(windowTitlebarHeight, bar.Height)).Shrink(0).
-		FillWidth().Padding(0, bar.Right, 0, bar.Left).DragWindow().
-		Background(c.Theme().Background)
+		FillWidth().Padding(0, bar.Right, 0, bar.Left).DragWindow()
 }
 
 var iconCache = map[string]*ui.SVG{}

@@ -80,6 +80,8 @@ Regenerate the original concept gallery with `node scripts/create_logos.mjs`. Re
 
 ## Build and verification
 
+In **Settings → Appearance**, adjust **Translucency** from 0% (opaque) to 100% (frosted). The default is 65%; changes apply immediately and persist across launches and backups. Windows 11 22H2 and later use native Acrylic blur, with a solid window background on systems without native materials. Translucent panes and dialogs soften their backdrop with a 10 DIP blur, while button faces remain at least 94% opaque. Native menus, context menus, and their item highlights blend over a blurred background captured when each popup opens; menu text stays opaque. These temporary captures remain in memory until the menu closes, and unavailable capture falls back to solid menu surfaces. Menus follow the app's font and rounded selection styling; confirmation dialogs share the panels' corner radius.
+
 Requires the Go version pinned in `go.mod`. Run `./build.ps1` to test, run MyGo's UI checks, and build the Windows application and installer. `go tool mygo build` also builds directly.
 
 GitHub Actions runs the same checks and Windows build on pushes, pull requests, and manual runs. Download the `bentomail-windows-amd64` artifact from the workflow run for the app, installer, and required resources.

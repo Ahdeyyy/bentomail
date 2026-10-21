@@ -71,6 +71,9 @@ type app struct {
 	contactName, contactEmail                                               string
 	tray                                                                    *mygo.Tray
 	closing, allowClose, quitRequested                                      bool
+	confirmOpen                                                             bool
+	confirmTitle, confirmMessage                                            string
+	confirmAction                                                           func()
 }
 
 func newApp(s *mailclient.Store) *app {
@@ -104,7 +107,8 @@ func newApp(s *mailclient.Store) *app {
 	if a.prefs.Accent == "" {
 		a.prefs.Accent = "Indigo"
 	}
-	a.theme = workspaceTheme(a.prefs.Dark, a.prefs.Accent)
+	a.prefs.Translucency = normalizedTranslucency(a.prefs.Translucency)
+	a.theme = workspaceTheme(a.prefs.Dark, a.prefs.Accent, a.prefs.Translucency)
 	a.list.Selected = &a.rowIndex
 	a.list.Selection = &a.selection
 	a.resetAccountForm()
@@ -504,8 +508,9 @@ func initials(s string) string {
 	return strings.ToUpper(v)
 }
 func (a *app) savePrefs() {
+	a.prefs.Translucency = normalizedTranslucency(a.prefs.Translucency)
 	p, s := a.prefs, a.store
-	a.theme = workspaceTheme(p.Dark, p.Accent)
+	a.theme = workspaceTheme(p.Dark, p.Accent, p.Translucency)
 	a.run("Preferences saved", func() error { return s.SavePreferences(p) })
 	a.previewKey = ""
 	a.updatePreview()
