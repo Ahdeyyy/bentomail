@@ -1,0 +1,49 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows amd64
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      CGO_ENABLED: '0'
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Generate app icons
+        run: go run ./cmd/brand-assets
+
+      - name: Test, check, and build
+        run: ./build.ps1
+
+      - name: Upload app and installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: bentomail-windows-amd64
+          path: build/windows-amd64/
+          if-no-files-found: error
+          retention-days: 14

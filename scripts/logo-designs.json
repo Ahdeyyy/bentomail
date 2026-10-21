@@ -1,0 +1,12 @@
+[
+ ["Folded compartments", "<rect x='15' y='23' width='66' height='50' rx='11'/><path d='M17 29 48 49 79 29M48 49v24M16 49h19M61 49h20'/>"] ,
+ ["Bento seal", "<rect x='12' y='25' width='72' height='49' rx='10'/><path d='m15 30 33 23 33-23'/><rect x='37' y='41' width='22' height='23' rx='5' fill='#5260d8'/><path d='M48 44v17M40 52h16' stroke='white' stroke-width='3'/>"] ,
+ ["Open lunch letter", "<path d='M14 40 48 17 82 40v34H14zM14 40l34 22 34-22'/><rect x='27' y='27' width='42' height='28' rx='5' fill='#f1f3f8'/><path d='M47 28v26M28 41h18M49 39h19'/><path d='m14 42 34 21 34-21M14 74l22-20M82 74 60 54'/>"] ,
+ ["Three compartment fold", "<rect x='13' y='24' width='70' height='50' rx='10'/><path d='m15 30 33 23 33-23M48 53v21M14 50h29M54 50h28'/><rect x='23' y='34' width='12' height='7' rx='2' fill='currentColor' stroke='none'/>"] ,
+ ["Negative space trays", "<path d='M20 24h56a8 8 0 0 1 8 8v36a8 8 0 0 1-8 8H20a8 8 0 0 1-8-8V32a8 8 0 0 1 8-8z' fill='currentColor' stroke='none'/><path d='m19 32 29 20 29-20M48 53v15M20 53h16M60 53h16' stroke='#f1f3f8' stroke-width='5'/>"] ,
+ ["Bento monogram", "<rect x='16' y='20' width='64' height='57' rx='12'/><path d='M36 21v55M37 47h42M17 29l19 17 24-17M37 55l20 14 22-15'/>"] ,
+ ["Stacked mail trays", "<path d='M20 21h56v48H20zM20 27l28 19 28-19M48 46v23M20 48h17M59 48h17M12 35v43a5 5 0 0 0 5 5h50'/>"] ,
+ ["Soft parcel", "<rect x='12' y='25' width='72' height='48' rx='16'/><path d='m17 31 31 21 31-21M48 52v21M13 52h22M61 52h22'/><path d='M35 18h26'/>"] ,
+ ["Diamond lunch letter", "<path d='m48 12 37 24v38a8 8 0 0 1-8 8H19a8 8 0 0 1-8-8V36zM12 37l36 25 36-25M48 62v19M12 59h22M62 59h22'/><path d='M34 30h28v17H34zM48 30v17'/>"] ,
+ ["Offset bento fold", "<rect x='13' y='24' width='70' height='50' rx='10'/><path d='m16 30 32 22 32-22M43 49v25M44 57h38M14 53h28'/>"]
+]

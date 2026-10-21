@@ -1,57 +1,94 @@
 package main
 
 import (
-	"fmt"
+	"context"
+	"flag"
 	"log"
+	"os"
+	"path/filepath"
+	"time"
 
+	"bentomail/internal/mailclient"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
-// app is the state the window shows. Its view builds the interface from
-// it, on the main thread, whenever the window needs a frame: after input,
-// after Window.Update, and while something animates.
-type app struct {
-	name  string
-	count int
-}
-
-func (a *app) view(c *ui.Context) {
-	t := c.Theme()
-	ui.Column(c).Fill().Center().Gap(16).Padding(24).Children(func() {
-		ui.Text(c, "bentomail").FontSize(26).Bold()
-		ui.TextInput(c, &a.name).Placeholder("Your name").Label("Name").Width(240)
-		greeting := "Hello!"
-		if a.name != "" {
-			greeting = fmt.Sprintf("Hello, %s!", a.name)
-		}
-		ui.Text(c, greeting).TextColor(t.TextMuted)
-		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-			if ui.Button(c, "−").Width(44).Clicked() {
-				a.count--
-			}
-			ui.Textf(c, "%d", a.count).FontSize(20).Width(48).TextAlign(ui.Center)
-			if ui.PrimaryButton(c, "+").Width(44).Clicked() {
-				a.count++
-			}
-		})
-	})
-}
-
 func main() {
-	a := &app{}
+	base, err := os.UserConfigDir()
+	if err != nil {
+		log.Fatal(err)
+	}
+	data := flag.String("data", filepath.Join(base, "Bentomail"), "local mail data directory")
+	flag.Parse()
+	if !mygo.App.RequestSingleInstanceLock() {
+		return
+	}
+	store, err := mailclient.Open(*data)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer store.Close()
+	a := newApp(store)
+	mygo.App.OnSecondInstance(func([]string, string) {
+		if a.window != nil {
+			a.window.Show()
+			a.window.Focus()
+		}
+	})
 	mygo.App.WhenReady(func() {
-		mygo.NewWindow(mygo.WindowOptions{
-			Title:     "bentomail",
-			Width:     480,
-			Height:    360,
-			MinWidth:  320,
-			MinHeight: 280,
-			// Opens where the user left it last time.
-			StateKey: "main",
-			// The window shows the interface MyGo draws, not a web page.
-			Content: ui.View(a.view),
+		source := mygo.ThemeLight
+		if a.prefs.Dark {
+			source = mygo.ThemeDark
+		}
+		mygo.Theme.SetSource(source)
+		win := newAppWindow(mygo.WindowOptions{Title: "Bentomail", Width: 1440, Height: 900, MinWidth: 1000, MinHeight: 680, StateKey: "main", Content: ui.View(a.view)}, func() *ui.Theme { return a.theme })
+		a.window = win
+		a.dispatch = win.Update
+		if mygo.WebViewAvailable() {
+			v, e := win.NewWebView(mygo.WebViewOptions{BackgroundColor: "#ffffff", Page: mygo.PageOptions{DevTools: mygo.DevToolsDisabled}})
+			if e == nil {
+				a.preview = v
+				a.loadHTML = func(html string) { v.Page().LoadHTML(html, "") }
+				a.print = v.Page().Print
+				v.Page().OnWillNavigate(a.previewNavigation)
+				v.Page().OnDidFinishLoad(func() {
+					if a.printPending {
+						a.printPending = false
+						v.Page().Print()
+					}
+				})
+			}
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		a.ctx = ctx
+		a.startWorker(ctx)
+		a.setupTray()
+		win.OnClose(a.closeRequested)
+		win.OnClosed(func() {
+			a.closed = true
+			cancel()
+			if a.tray != nil {
+				a.tray.Destroy()
+			}
 		})
+		go func() {
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					win.Update(func() {
+						if !a.closed {
+							a.tick()
+						}
+					})
+				}
+			}
+		}()
+		a.syncMail()
+		a.refreshWatchers()
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
