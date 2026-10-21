@@ -84,6 +84,8 @@ Requires the Go version pinned in `go.mod`. Run `./build.ps1` to test, run MyGo'
 
 GitHub Actions runs the same checks and Windows build on pushes, pull requests, and manual runs. Download the `bentomail-windows-amd64` artifact from the workflow run for the app, installer, and required resources.
 
+After a successful push or manual run on the default branch, the workflow also publishes a GitHub Release tagged `build-<run number>` for the exact built commit. Each release includes `bentomail-windows-amd64.zip` with the app and resources, plus the standalone installer. Rerunning the workflow updates the same release's assets. Pull requests and other branches only build and upload workflow artifacts.
+
 ```powershell
 $env:CGO_ENABLED = '0'
 go test ./...
