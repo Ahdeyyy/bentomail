@@ -1,6 +1,11 @@
 {
   "name": "bentomail",
   "identifier": "dev.bentomail.desktop",
-  "version": "0.1.0",
-  "out": "build"
+  "version": "0.2.0",
+  "out": "build",
+  "updates": {
+    "publicKey": "8l79J5s9cDLEQag8AYwzJ57kxEYBcvoRzYkUZxKs9Cg=",
+    "github": "Ahdeyyy/bentomail",
+    "tagPrefix": "build-"
+  }
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"bentomail/internal/mailclient"
+	"github.com/egoist/mygo/plugins/updater"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/richtext"
 )
@@ -22,7 +23,7 @@ func (a *app) view(c *ui.Context) {
 	})
 	ui.Column(c).Fill().Children(func() {
 		ui.Row(c).Grow(1).FillWidth().Children(func() {
-			ui.Split(c, &a.prefs.SidebarWidth, func() { a.sidebar(c) }, func() {
+			content := func() {
 				ui.Column(c).Fill().Children(func() {
 					windowTitlebar(c)
 					a.topbar(c)
@@ -41,7 +42,13 @@ func (a *app) view(c *ui.Context) {
 						a.mailView(c)
 					}
 				})
-			}).Fill()
+			}
+			if a.prefs.SidebarCollapsed {
+				ui.Column(c.Key("sidebar-rail")).Width(80).Shrink(0).FillHeight().Children(func() { a.sidebar(c) })
+				ui.Column(c.Key("workspace-content")).Fill().Children(content)
+			} else {
+				ui.Split(c.Key("workspace-split"), &a.prefs.SidebarWidth, func() { a.sidebar(c) }, content).Fill()
+			}
 		})
 		frost(ui.Row(c), surface(a.theme)).Height(28).Shrink(0).FillWidth().Padding(0, 16).Gap(8).AlignItems(ui.Center).BorderWidth(1, 0, 0, 0).BorderColor(a.theme.Border).Children(func() {
 			color := a.theme.Success
@@ -60,15 +67,32 @@ func (a *app) view(c *ui.Context) {
 }
 func (a *app) sidebar(c *ui.Context) {
 	t := a.theme
-	ui.Column(c).Fill().Padding(0, 14, 12, 14).Gap(7).Children(func() {
-		ui.Row(c).Label("Sidebar header").Height(52).Shrink(0).Gap(9).AlignItems(ui.Center).Padding(0, 6).DragWindow().Children(func() {
+	collapsed := a.prefs.SidebarCollapsed
+	padding, scrollPadding := float32(20), float32(20)
+	if collapsed {
+		padding, scrollPadding = 16, 0
+	}
+	ui.Column(c).Fill().Padding(12, 0, 20, 0).Gap(10).Children(func() {
+		header := ui.Row(c).Label("Sidebar header").Height(52).Shrink(0).Gap(9).AlignItems(ui.Center).Padding(0, padding+6).DragWindow()
+		if collapsed {
+			header.Center().Padding(0, padding)
+		}
+		header.Children(func() {
 			ui.Box(c).Size(31, 31).TextColor(t.Accent).Center().Children(func() { ui.Icon(c, icon("logo")).Size(31, 31) })
-			ui.Text(c, "bentomail").FontSize(18).FontWeight(700).Grow(1)
+			if !collapsed {
+				ui.Text(c, "bentomail").FontSize(18).FontWeight(700).Grow(1)
+			}
 		})
-		action(c, "compose", "Compose", true, func() { a.newComposer(nil, "new") }).FillWidth().Height(40)
-		ui.Scroll(c).Grow(1).FillWidth().Children(func() {
-			ui.Column(c).FillWidth().Padding(0, 20, 0, 0).Gap(3).Children(func() {
-				ui.Text(c, "WORKSPACE").FontSize(9).FontWeight(700).TextColor(t.TextMuted).Padding(22, 10, 8, 10)
+		ui.Row(c).FillWidth().Shrink(0).Padding(0, padding).Children(func() {
+			a.sidebarAction(c, "compose", "Compose", true, func() { a.newComposer(nil, "new") })
+		})
+		// Give the scroll viewport the full sidebar width while keeping its
+		// contents inset, leaving a gutter for the scrollbar beside the buttons.
+		ui.Scroll(c).Label("Sidebar navigation").Grow(1).FillWidth().Children(func() {
+			ui.Column(c).FillWidth().Padding(0, padding+scrollPadding, 0, padding).Gap(3).Children(func() {
+				if !collapsed {
+					ui.Text(c, "WORKSPACE").FontSize(9).FontWeight(700).TextColor(t.TextMuted).Padding(22, 10, 8, 10)
+				}
 				for _, v := range []struct{ id, label, icon string }{{"inbox", "Inbox", "inbox"}, {"starred", "Starred", "star"}, {"snoozed", "Snoozed", "clock"}, {"followup", "Follow up", "clock"}, {"sent", "Sent", "send"}, {"drafts", "Drafts", "compose"}, {"outbox", "Outbox", "send"}, {"archive", "Archive", "archive"}, {"all", "All mail", "mail"}, {"trash", "Trash", "trash"}, {"spam", "Junk", "shield"}} {
 					n := 0
 					for _, m := range a.state.Messages {
@@ -93,24 +117,41 @@ func (a *app) sidebar(c *ui.Context) {
 					a.nav(c, v.icon, v.label, v.id, n)
 				}
 				ui.Row(c).FillWidth().Padding(18, 10, 6, 10).Children(func() {
-					ui.Text(c, "TAGS").FontSize(9).Bold().TextColor(t.TextMuted).Grow(1)
-					iconButton(c, "plus", "Manage tags", func() { a.page = "settings"; a.settingsTab = "Organization" }).Size(20, 20)
+					if !collapsed {
+						ui.Text(c, "TAGS").FontSize(9).Bold().TextColor(t.TextMuted).Grow(1)
+					}
+					a.sidebarIconButton(c, "plus", "Manage tags", func() { a.page = "settings"; a.settingsTab = "Organization" }).Size(20, 20)
 				})
 				for _, tag := range a.state.Tags {
 					a.nav(c, "tag", tag, "tag:"+tag, 0)
 				}
-				if len(a.state.Tags) == 0 {
+				if len(a.state.Tags) == 0 && !collapsed {
 					ui.Text(c, "No tags").FontSize(11).TextColor(t.TextMuted).Padding(7, 10)
 				}
 				if len(a.state.SavedSearches) > 0 {
-					ui.Text(c, "SAVED SEARCHES").FontSize(9).Bold().TextColor(t.TextMuted).Padding(18, 10, 6, 10)
+					if !collapsed {
+						ui.Text(c, "SAVED SEARCHES").FontSize(9).Bold().TextColor(t.TextMuted).Padding(18, 10, 6, 10)
+					}
 					for name, q := range a.state.SavedSearches {
-						ui.ButtonBase(c).Label("Search "+name).FillWidth().Padding(9, 10).Radius(7).OnClick(func() { a.query = q; a.navigate("all") }).Children(func() { ui.Icon(c, icon("search")).Size(15, 15); ui.Text(c, name).FontSize(11) })
+						b := sidebarFocus(c, ui.ButtonBase(c.Key("saved-search-"+name)), false).Label("Search "+name).FillWidth().Padding(9, 10).Radius(7).OnClick(func() { a.query = q; a.navigate("all") })
+						if collapsed {
+							sidebarTooltip(c, b, name)
+						} else {
+							b.Tooltip(name)
+						}
+						b.Children(func() {
+							ui.Icon(c, icon("search")).Size(15, 15).Shrink(0)
+							if !collapsed {
+								ui.Text(c, name).FontSize(11)
+							}
+						})
 					}
 				}
 				folders := a.state.Folders[a.accountID]
 				if len(folders) > 0 {
-					ui.Text(c, "FOLDERS").FontSize(9).Bold().TextColor(t.TextMuted).Padding(18, 10, 6, 10)
+					if !collapsed {
+						ui.Text(c, "FOLDERS").FontSize(9).Bold().TextColor(t.TextMuted).Padding(18, 10, 6, 10)
+					}
 					for _, f := range folders {
 						canon := canonicalFolder(f)
 						if slices.Contains([]string{"inbox", "sent", "drafts", "archive", "trash", "spam"}, canon) {
@@ -121,20 +162,58 @@ func (a *app) sidebar(c *ui.Context) {
 				}
 			})
 		})
-		ui.Column(c).FillWidth().Gap(3).Padding(10, 0, 0, 0).BorderWidth(1, 0, 0, 0).BorderColor(t.Border).Children(func() {
-			ui.Row(c).FillWidth().Gap(6).Children(func() {
-				action(c, "settings", "Settings", false, func() { a.page = "settings" }).Grow(1)
-				iconButton(c, "sun", "Toggle dark mode", func() { a.prefs.Dark = !a.prefs.Dark; a.savePrefs() })
+		ui.Column(c).FillWidth().Shrink(0).Padding(0, padding).Children(func() {
+			ui.Column(c).FillWidth().Gap(3).Padding(10, 0, 0, 0).BorderWidth(1, 0, 0, 0).BorderColor(t.Border).Children(func() {
+				if collapsed {
+					a.sidebarAction(c, "settings", "Settings", false, func() { a.page = "settings" })
+					a.sidebarAction(c, "download", "Update app", false, updater.CheckForUpdates)
+					a.sidebarAction(c, "sun", "Toggle dark mode", false, func() { a.prefs.Dark = !a.prefs.Dark; a.savePrefs() })
+					return
+				}
+				ui.Row(c).FillWidth().Gap(6).Children(func() {
+					a.sidebarIconButton(c.Key("sidebar-settings"), "settings", "Settings", func() { a.page = "settings" })
+					a.sidebarIconButton(c.Key("sidebar-update"), "download", "Update app", updater.CheckForUpdates)
+					ui.Box(c).Grow(1)
+					a.sidebarIconButton(c, "sun", "Toggle dark mode", func() { a.prefs.Dark = !a.prefs.Dark; a.savePrefs() })
+				})
+				ui.Textf(c, "%d accounts · Stored on this PC", len(a.state.Accounts)).FontSize(9).TextColor(t.TextMuted).Padding(6, 7)
 			})
-			ui.Textf(c, "%d accounts · Stored on this PC", len(a.state.Accounts)).FontSize(9).TextColor(t.TextMuted).Padding(6, 7)
 		})
 	})
+}
+func (a *app) sidebarIconButton(c *ui.Context, ic, label string, fn func()) ui.Element {
+	b := sidebarFocus(c, iconButtonBase(c, ic, label, fn), false)
+	if a.prefs.SidebarCollapsed {
+		sidebarTooltip(c, b, label)
+	} else {
+		b.Tooltip(label)
+	}
+	return b
+}
+func (a *app) sidebarAction(c *ui.Context, ic, label string, primary bool, fn func()) {
+	if !a.prefs.SidebarCollapsed {
+		sidebarFocus(c, action(c.Key("sidebar-"+label), ic, label, primary, fn), primary).FillWidth().Height(40)
+		return
+	}
+	b := sidebarFocus(c, iconButtonBase(c.Key("sidebar-"+label), ic, label, fn), primary).FillWidth().Height(40)
+	sidebarTooltip(c, b, label)
+	if primary {
+		b.Background(a.theme.Accent).TextColor(a.theme.AccentText)
+	}
 }
 func (a *app) nav(c *ui.Context, ic, label, id string, count int) {
 	c.Key("nav-" + id)
 	sel := a.page == "mail" && a.folder == id
 	t := a.theme
-	b := ui.ButtonBase(c).Label(label).FillWidth().Padding(9, 10).Gap(10).Radius(7).OnClick(func() { a.navigate(id) })
+	b := sidebarFocus(c, ui.ButtonBase(c), false).Label(label).FillWidth().Padding(9, 10).Gap(10).Radius(7).OnClick(func() { a.navigate(id) })
+	if a.prefs.SidebarCollapsed {
+		b.Height(36).Center()
+		tip := label
+		if count > 0 {
+			tip = fmt.Sprintf("%s · %d unread", label, count)
+		}
+		sidebarTooltip(c, b, tip)
+	}
 	if sel {
 		b.Background(t.Surface.Mix(t.Accent, .12)).TextColor(t.Accent)
 	} else if b.Hovered() {
@@ -143,7 +222,10 @@ func (a *app) nav(c *ui.Context, ic, label, id string, count int) {
 		b.TextColor(t.TextMuted)
 	}
 	b.Children(func() {
-		ui.Icon(c, icon(ic)).Size(17, 17)
+		ui.Icon(c, icon(ic)).Size(17, 17).Shrink(0)
+		if a.prefs.SidebarCollapsed {
+			return
+		}
 		ui.Text(c, label).FontSize(12).FontWeight(500).Grow(1).MaxLines(1)
 		if count > 0 {
 			ui.Textf(c, "%d", count).FontSize(10).Padding(1, 5).Radius(4).Background(t.Accent.Alpha(.1))
@@ -177,20 +259,15 @@ func (a *app) findMessage(id string) (mailclient.Message, bool) {
 func (a *app) topbar(c *ui.Context) {
 	t := a.theme
 	ui.Row(c).Height(68).Shrink(0).FillWidth().Padding(12, 20).Gap(12).AlignItems(ui.Center).Children(func() {
-		opts := []string{"All accounts"}
-		for _, ac := range a.state.Accounts {
-			opts = append(opts, ac.Name+" <"+ac.Email+">")
+		label := "Collapse sidebar"
+		if a.prefs.SidebarCollapsed {
+			label = "Expand sidebar"
 		}
-		ui.Select(c, &a.accountPick, opts).Label("Active account").Width(245).OnChange(func() {
-			a.accountID = ""
-			for _, ac := range a.state.Accounts {
-				if a.accountPick == ac.Name+" <"+ac.Email+">" {
-					a.accountID = ac.ID
-					break
-				}
-			}
-			a.navigate(a.folder)
+		iconButton(c.Key("sidebar-toggle"), "sidebar", label, func() {
+			a.prefs.SidebarCollapsed = !a.prefs.SidebarCollapsed
+			a.savePrefs()
 		})
+		a.accountSwitcher(c)
 		ui.Row(c).Grow(1).Height(38).Padding(0, 11).Gap(8).AlignItems(ui.Center).Background(t.Surface).Radius(8).Border(1, t.Border).Children(func() {
 			ui.Icon(c, icon("search")).Size(17, 17).TextColor(t.TextMuted)
 			ui.TextInput(c, &a.query).Bind(&a.searchHandle).Label("Search mail").Placeholder("Search your mail…").Grow(1).Border(0, ui.Transparent).Background(ui.Transparent).OnChange(func() { a.page = "mail"; a.selectedID = ""; a.rowIndex = -1; a.searchMail() }).OnShortcut(0, ui.KeyEscape, func() { a.query = "" })
@@ -200,7 +277,7 @@ func (a *app) topbar(c *ui.Context) {
 				ui.Text(c, "Ctrl F").FontSize(10).TextColor(t.TextMuted)
 			}
 		})
-		label := "Sync mail"
+		label = "Sync mail"
 		if a.syncing {
 			label = "Cancel synchronization"
 		}
@@ -505,7 +582,7 @@ func (a *app) reader(c *ui.Context) {
 			})
 		})
 		ui.Row(c).FillWidth().Padding(0, 24, 8, 24).Gap(8).Children(func() {
-			ui.Select(c, &a.bodyMode, []string{"Formatted", "Plain text", "Source", "Conversation"}).Label("Message format").Width(160).OnChange(func() { a.previewKey = ""; a.updatePreview() })
+			selectInput(c, &a.bodyMode, []string{"Formatted", "Plain text", "Source", "Conversation"}).Label("Message format").Width(160).OnChange(func() { a.previewKey = ""; a.updatePreview() })
 			if m.HTML != "" {
 				label := "Remote images blocked"
 				if a.prefs.RemoteImages {

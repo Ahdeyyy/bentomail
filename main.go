@@ -10,10 +10,12 @@ import (
 
 	"bentomail/internal/mailclient"
 	"github.com/egoist/mygo"
+	updatenative "github.com/egoist/mygo/plugins/updater/native"
 	"github.com/egoist/mygo/ui"
 )
 
 func main() {
+	mygo.Use(updatenative.Plugin)
 	base, err := os.UserConfigDir()
 	if err != nil {
 		log.Fatal(err)
@@ -63,6 +65,7 @@ func main() {
 		a.ctx = ctx
 		a.startWorker(ctx)
 		a.setupTray()
+		mygo.App.OnBeforeQuit(a.prepareQuit)
 		win.OnClose(a.closeRequested)
 		win.OnClosed(func() {
 			a.closed = true

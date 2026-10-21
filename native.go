@@ -60,6 +60,40 @@ func (a *app) closeRequested(event *mygo.CloseEvent) {
 		a.window.Close()
 	})
 }
+
+// Relaunch uses a synchronous quit event: canceling it to save asynchronously
+// also cancels the relaunch. Flush local drafts before windows close so the
+// updater can restart, including when closing a window would normally hide it.
+func (a *app) prepareQuit(event *mygo.QuitEvent) {
+	windows := []*app{}
+	var collect func(*app)
+	collect = func(w *app) {
+		if !w.closed {
+			windows = append(windows, w)
+		}
+		for _, child := range w.childWindows {
+			collect(child)
+		}
+	}
+	collect(a)
+	for _, w := range windows {
+		for _, co := range w.composers {
+			if _, err := a.store.SaveDraft(co.snapshot()); err != nil {
+				event.PreventDefault()
+				w.notice("Could not save draft before quitting: "+err.Error(), true)
+				return
+			}
+		}
+	}
+	if err := a.store.SavePreferences(a.prefs); err != nil {
+		event.PreventDefault()
+		a.notice("Could not save preferences before quitting: "+err.Error(), true)
+		return
+	}
+	for _, w := range windows {
+		w.allowClose = true
+	}
+}
 func (a *app) updateBadge() {
 	if a.window == nil {
 		return
@@ -78,6 +112,7 @@ func (a *app) updateBadge() {
 }
 func (a *app) openMessageWindow(m mailclient.Message) {
 	b := newApp(a.store)
+	a.childWindows = append(a.childWindows, b)
 	b.accountID = m.AccountID
 	b.selectedID = m.ID
 	b.prefs.SidebarWidth = 200

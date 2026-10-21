@@ -38,7 +38,16 @@ jobs:
         run: go run ./cmd/brand-assets
 
       - name: Test, check, and build
-        run: ./build.ps1
+        env:
+          MYGO_UPDATER_PRIVATE_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
+        run: |
+          $config = Get-Content mygo.json -Raw | ConvertFrom-Json
+          $config.version = "0.2.$env:GITHUB_RUN_NUMBER"
+          $config | ConvertTo-Json -Depth 10 | Set-Content mygo.json
+          if ($env:GITHUB_REF -eq 'refs/heads/${{ github.event.repository.default_branch }}' -and !$env:MYGO_UPDATER_PRIVATE_KEY) {
+            throw 'Default-branch releases require MYGO_UPDATER_PRIVATE_KEY'
+          }
+          ./build.ps1
 
       - name: Upload app and installer
         uses: actions/upload-artifact@v7
@@ -75,12 +84,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: build-${{ github.run_number }}
+          RELEASE_TAG: build-0.2.${{ github.run_number }}
         run: |
           $ErrorActionPreference = 'Stop'
           $installers = @(Get-ChildItem -LiteralPath artifacts -Filter '* Setup *.exe' -File)
           if ($installers.Count -eq 0) { throw 'Installer not found' }
-          $assets = @('bentomail-windows-amd64.zip') + @($installers.FullName)
+          $updates = @(Get-ChildItem -LiteralPath artifacts -File | Where-Object { $_.Name -match '^update-.*\.json$|\.tar\.gz$|\.delta$' })
+          if (!($updates | Where-Object Name -eq 'update-windows-amd64.json')) { throw 'Signed update manifest not found' }
+          $assets = @('bentomail-windows-amd64.zip') + @($installers.FullName) + @($updates.FullName)
 
           gh release view $env:RELEASE_TAG *> $null
           if ($LASTEXITCODE -eq 0) {

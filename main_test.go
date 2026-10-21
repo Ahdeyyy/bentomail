@@ -159,14 +159,31 @@ func TestRenderWorkspace(t *testing.T) {
 	a := seededApp(t)
 	a.selectedID = a.state.Messages[0].ID
 	tt := ui.NewTester(a.view, 1440, 900)
-	for _, name := range []string{"workspace", "composer", "settings", "settings-125", "settings-150", "settings-small", "settings-dark", "storage-dark", "storage", "dark"} {
+	for _, name := range []string{"workspace", "collapsed", "account-switcher", "composer", "composer-small", "settings", "settings-dropdown", "settings-125", "settings-150", "settings-small", "settings-dark", "storage-dark", "storage", "dark"} {
 		switch name {
+		case "collapsed":
+			a.prefs.SidebarCollapsed = true
+		case "account-switcher":
+			a.prefs.SidebarCollapsed = false
+			tt.Frame()
+			if err := tt.Click("Active account"); err != nil {
+				t.Fatal(err)
+			}
 		case "composer":
+			tt.Key(0, ui.KeyEscape)
 			a.newComposer(nil, "new")
+		case "composer-small":
+			tt.SetSize(1000, 680)
 		case "settings":
+			tt.SetSize(1440, 900)
 			a.page = "settings"
 			a.settingsTab = "Appearance"
+		case "settings-dropdown":
+			if err := tt.Click("Indigo"); err != nil {
+				t.Fatal(err)
+			}
 		case "settings-125":
+			tt.Key(0, ui.KeyEscape)
 			tt.SetScale(1.25)
 		case "settings-150":
 			tt.SetScale(1.5)

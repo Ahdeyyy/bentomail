@@ -25,6 +25,7 @@ type app struct {
 	prefs                                                                   mailclient.Preferences
 	theme                                                                   *ui.Theme
 	window                                                                  *mygo.Window
+	childWindows                                                            []*app
 	ctx                                                                     context.Context
 	dispatch                                                                func(func())
 	jobs                                                                    chan work

@@ -2,6 +2,7 @@ package mailclient
 
 import (
 	"encoding/json"
+	"math"
 	"time"
 )
 
@@ -118,6 +119,7 @@ type Preferences struct {
 	PreviewLines        int
 	Layout              string
 	SidebarWidth        float32
+	SidebarCollapsed    bool
 	ListWidth           float32
 	Notify              bool
 	NotificationPreview bool
@@ -130,6 +132,14 @@ type Preferences struct {
 }
 
 const DefaultTranslucency = 65
+const MaxTranslucency = 65
+
+func NormalizeTranslucency(value float64) float64 {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return DefaultTranslucency
+	}
+	return max(0, min(MaxTranslucency, value))
+}
 
 // Keep older preferences frosted by default while preserving an explicit 0
 // (opaque), including when restoring a backup.
@@ -140,6 +150,7 @@ func (p *Preferences) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*p = Preferences(value)
+	p.Translucency = NormalizeTranslucency(p.Translucency)
 	return nil
 }
 

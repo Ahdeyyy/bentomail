@@ -79,8 +79,9 @@ func (a *app) accountsSettings(c *ui.Context) {
 			})
 			textButton(c, "Edit").OnClick(func() {
 				a.accountForm = ac
+				a.accountForm.SMTPPort, a.accountForm.SMTPTLS = mailclient.SMTPTransport(ac.SMTPPort, ac.SMTPTLS)
 				a.imapPort = strconv.Itoa(ac.IMAPPort)
-				a.smtpPort = strconv.Itoa(ac.SMTPPort)
+				a.smtpPort = strconv.Itoa(a.accountForm.SMTPPort)
 				a.password = ""
 			})
 			textButton(c, "Use by default").OnClick(func() { a.prefs.DefaultAccountID = ac.ID; a.savePrefs() })
@@ -144,7 +145,7 @@ func (a *app) accountsSettings(c *ui.Context) {
 		ui.Column(c).Width(120).Children(func() { field(c, "IMAP port", &a.imapPort, "993") })
 		ui.Column(c).Width(200).Gap(5).Children(func() {
 			ui.Text(c, "IMAP security").FontSize(11)
-			ui.Select(c, &a.accountForm.IMAPTLS, []string{"TLS", "STARTTLS", "None"}).Label("IMAP security").FillWidth()
+			selectInput(c, &a.accountForm.IMAPTLS, []string{"TLS", "STARTTLS", "None"}).Label("IMAP security").FillWidth()
 		})
 	})
 	field(c, "IMAP username", &a.accountForm.Username, "Usually your email address")
@@ -154,11 +155,12 @@ func (a *app) accountsSettings(c *ui.Context) {
 		ui.Column(c).Width(120).Children(func() { field(c, "SMTP port", &a.smtpPort, "587") })
 		ui.Column(c).Width(200).Gap(5).Children(func() {
 			ui.Text(c, "SMTP security").FontSize(11)
-			ui.Select(c, &a.accountForm.SMTPTLS, []string{"TLS", "STARTTLS", "None"}).Label("SMTP security").FillWidth()
+			selectInput(c, &a.accountForm.SMTPTLS, []string{"TLS", "STARTTLS", "None"}).Label("SMTP security").FillWidth()
 		})
 	})
 	field(c, "SMTP username", &a.accountForm.SMTPUsername, "Leave blank to use the IMAP username")
-	ui.Select(c, &a.accountForm.AuthMode, []string{"password", "oauth2"}).Label("Authentication method").Width(200)
+	note(c, "Port 587 uses STARTTLS; port 465 uses direct TLS. Standard SMTP ports select the matching encrypted protocol automatically.")
+	selectInput(c, &a.accountForm.AuthMode, []string{"password", "oauth2"}).Label("Authentication method").Width(200)
 	label := "Password or app password"
 	if a.accountForm.AuthMode == "oauth2" {
 		label = "OAuth access token"
@@ -201,7 +203,7 @@ func (a *app) accountsSettings(c *ui.Context) {
 		if a.oauthProvider == "" {
 			a.oauthProvider = "Microsoft"
 		}
-		ui.Select(c, &a.oauthProvider, []string{"Microsoft", "Google"}).Label("OAuth provider").Width(240)
+		selectInput(c, &a.oauthProvider, []string{"Microsoft", "Google"}).Label("OAuth provider").Width(240)
 		field(c, "OAuth desktop client ID", &a.oauthClientID, "Application ID from your provider registration")
 		ui.Text(c, "Desktop client secret (Google, if issued)").FontSize(11)
 		ui.TextInput(c, &a.oauthClientSecret).Password().Label("OAuth desktop client secret").FillWidth().MaxWidth(480)
@@ -293,24 +295,24 @@ func (a *app) appearanceSettings(c *ui.Context) {
 			ui.Text(c, "Translucency").FontSize(11).Grow(1)
 			ui.Textf(c, "%.0f%%", a.prefs.Translucency).FontSize(11).TextColor(a.theme.TextMuted)
 		})
-		ui.StepSlider(c, &a.prefs.Translucency, 0, 100, 5).Label("Translucency level").FillWidth().OnChange(a.savePrefs)
+		ui.StepSlider(c, &a.prefs.Translucency, 0, mailclient.MaxTranslucency, 5).Label("Translucency level").FillWidth().OnChange(a.savePrefs)
 		ui.Row(c).FillWidth().Children(func() {
 			ui.Text(c, "Opaque").FontSize(10).TextColor(a.theme.TextMuted).Grow(1)
-			ui.Text(c, "Frosted").FontSize(10).TextColor(a.theme.TextMuted)
+			ui.Text(c, "65% maximum").FontSize(10).TextColor(a.theme.TextMuted)
 		})
 	})
 	note(c, "Adjust the frosted background. Changes apply immediately and are saved automatically. Background blur follows system transparency settings; unsupported systems use a solid background.")
 	ui.Text(c, "Accent color").FontSize(11)
-	ui.Select(c, &a.prefs.Accent, []string{"Indigo", "Teal", "Rose", "Amber", "Violet"}).Label("Accent color").Width(240).OnChange(a.savePrefs)
+	selectInput(c, &a.prefs.Accent, []string{"Indigo", "Teal", "Rose", "Amber", "Violet"}).Label("Accent color").Width(240).OnChange(a.savePrefs)
 	ui.Text(c, "Message density").FontSize(11)
-	ui.Select(c, &a.prefs.Density, []string{"Comfortable", "Compact"}).Label("Message density").Width(240).OnChange(a.savePrefs)
+	selectInput(c, &a.prefs.Density, []string{"Comfortable", "Compact"}).Label("Message density").Width(240).OnChange(a.savePrefs)
 	ui.Text(c, "Reading pane").FontSize(11)
-	ui.Select(c, &a.prefs.Layout, []string{"Right", "Bottom", "Hidden"}).Label("Reading pane").Width(240).OnChange(a.savePrefs)
+	selectInput(c, &a.prefs.Layout, []string{"Right", "Bottom", "Hidden"}).Label("Reading pane").Width(240).OnChange(a.savePrefs)
 	section(c, "Reading")
 	ui.Text(c, "Reading font").FontSize(11)
-	ui.Select(c, &a.prefs.ReadingFont, []string{"Martian Grotesk", "Arial", "Georgia", "Consolas"}).Label("Reading font").Width(240).OnChange(a.savePrefs)
+	selectInput(c, &a.prefs.ReadingFont, []string{"Martian Grotesk", "Arial", "Georgia", "Consolas"}).Label("Reading font").Width(240).OnChange(a.savePrefs)
 	ui.Text(c, "Mark messages read").FontSize(11)
-	ui.Select(c, &a.prefs.ReadMode, []string{"Immediately", "After 3 seconds", "Manually"}).Label("Mark messages read").Width(240).OnChange(a.savePrefs)
+	selectInput(c, &a.prefs.ReadMode, []string{"Immediately", "After 3 seconds", "Manually"}).Label("Mark messages read").Width(240).OnChange(a.savePrefs)
 	ui.Checkbox(c, &a.prefs.HideAvatars, "Hide sender avatars").OnChange(a.savePrefs)
 	ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 		ui.Textf(c, "Reading font size: %d", a.prefs.ReadingSize).Width(200)
@@ -403,7 +405,7 @@ func (a *app) organizationSettings(c *ui.Context) {
 	if a.rule.Field == "" {
 		a.rule.Field = "from"
 	}
-	ui.Select(c, &a.rule.Field, []string{"from", "to", "subject", "body"}).Label("Rule field").Width(220)
+	selectInput(c, &a.rule.Field, []string{"from", "to", "subject", "body"}).Label("Rule field").Width(220)
 	field(c, "Contains", &a.rule.Contains, "@client.com")
 	field(c, "Apply tag", &a.rule.Tag, "Clients")
 	field(c, "Set category", &a.rule.Category, "Work")

@@ -198,9 +198,7 @@ func (s *Store) SaveAccount(a Account, password string) error {
 	if a.IMAPTLS == "" {
 		a.IMAPTLS = "TLS"
 	}
-	if a.SMTPTLS == "" {
-		a.SMTPTLS = "TLS"
-	}
+	a.SMTPPort, a.SMTPTLS = SMTPTransport(a.SMTPPort, a.SMTPTLS)
 
 	for _, mode := range []string{a.IMAPTLS, a.SMTPTLS} {
 		if mode != "TLS" && mode != "STARTTLS" && mode != "None" {
@@ -408,6 +406,7 @@ func (s *Store) DeleteDraft(id string) error {
 
 // SavePreferences updates user preferences.
 func (s *Store) SavePreferences(p Preferences) error {
+	p.Translucency = NormalizeTranslucency(p.Translucency)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

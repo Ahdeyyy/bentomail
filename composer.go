@@ -263,7 +263,7 @@ func (a *app) composeView(c *ui.Context) {
 				}
 				ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
 					ui.Text(c, "From").Width(50).FontSize(11).TextColor(t.TextMuted)
-					ui.Select(c, &co.accountPick, opts).Label("Sending identity").Grow(1).OnChange(func() {
+					selectInput(c, &co.accountPick, opts).Label("Sending identity").Grow(1).OnChange(func() {
 						for _, ac := range a.state.Accounts {
 							if co.accountPick == ac.Name+" <"+ac.Email+">" {
 								co.draft.AccountID = ac.ID
@@ -386,7 +386,7 @@ func (a *app) composeView(c *ui.Context) {
 				action(c, "send", "Send", true, func() { a.queueComposer(co) }).Disabled(len(a.state.Accounts) == 0)
 				iconButton(c, "attachment", "Attach files", func() { a.pickAttachments(co, false) })
 				textButton(c, "Inline image").FontSize(10).OnClick(func() { a.pickAttachments(co, true) })
-				ui.TextInput(c, &co.schedule).Label("Scheduled send time").Placeholder("YYYY-MM-DD HH:MM (optional)").Width(230)
+				ui.TextInput(c, &co.schedule).Label("Scheduled send time").Placeholder("YYYY-MM-DD HH:MM (optional)").Width(300).Shrink(0)
 				ui.Box(c).Grow(1)
 				iconButton(c, "trash", "Discard draft", func() {
 					a.confirm("Discard this draft?", "The message and its attachments will be removed.", func() { a.closeComposer(co.draft.ID, true) })
@@ -410,7 +410,7 @@ func (a *app) recipientField(c *ui.Context, co *composer, label string, value *s
 				c.Key(label + address)
 				ui.Button(c, address+" ×").Label("Remove " + label + " recipient " + address).FontSize(10).OnClick(func() { *tokens = slices.Delete(*tokens, i, i+1); co.dirty = true })
 			}
-			ui.Autocomplete(c, entry, a.state.Contacts).Label(label + " recipients").Placeholder("name@company.com").Grow(1).MinWidth(180).OnChange(func() { co.dirty = true }).OnSubmit(func() { co.commitRecipient(tokens, entry) })
+			recipientAutocomplete(c, entry, a.state.Contacts).Label(label + " recipients").Placeholder("name@company.com").Grow(1).MinWidth(180).OnChange(func() { co.dirty = true }).OnSubmit(func() { co.commitRecipient(tokens, entry) })
 		})
 		menuButton(c, "Contacts", func(menu *ui.Menu) {
 			for _, addr := range a.state.Contacts {

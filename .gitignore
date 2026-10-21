@@ -4,3 +4,4 @@ mygo_windows_*.syso
 /scratch/
 *.exe
 *.test
+mygo-update.key

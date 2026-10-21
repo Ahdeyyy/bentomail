@@ -4,7 +4,7 @@ A native Windows IMAP/SMTP mail client built with Go and MyGo 0.5.5. Mail, draft
 
 ## Run
 
-Open `build/windows-amd64/bentomail.exe`, or install with `bentomail Setup 0.1.0 amd64.exe` in the same directory. The installer is unsigned.
+Open `build/windows-amd64/bentomail.exe`, or install with the `bentomail Setup` executable in the same directory. The Windows installer is unsigned; in-app update archives are signed separately.
 
 For development:
 
@@ -80,13 +80,19 @@ Regenerate the original concept gallery with `node scripts/create_logos.mjs`. Re
 
 ## Build and verification
 
-In **Settings → Appearance**, adjust **Translucency** from 0% (opaque) to 100% (frosted). The default is 65%; changes apply immediately and persist across launches and backups. Windows 11 22H2 and later use native Acrylic blur, with a solid window background on systems without native materials. Translucent panes and dialogs soften their backdrop with a 10 DIP blur, while button faces remain at least 94% opaque. Native menus, context menus, and their item highlights blend over a blurred background captured when each popup opens; menu text stays opaque. These temporary captures remain in memory until the menu closes, and unavailable capture falls back to solid menu surfaces. Menus follow the app's font and rounded selection styling; confirmation dialogs share the panels' corner radius.
+In **Settings → Appearance**, adjust **Translucency** from 0% (opaque) to a maximum of 65% (frosted). The default is 65%; older saved or restored values above 65% are capped automatically. Changes apply immediately and persist across launches and backups. Windows 11 22H2 and later use native Acrylic blur, with a solid window background on systems without native materials. Translucent panes, dropdowns, and dialogs soften their backdrop with a 32 DIP blur, while button faces remain at least 94% opaque. Floating surfaces retain at least 80% tint opacity so background text cannot compete with their labels; recipient suggestions use a solid surface. Native menus, context menus, and their item highlights blend over a similarly strong blurred background captured when each popup opens; menu text stays opaque. These temporary captures remain in memory until the menu closes, and unavailable capture falls back to solid menu surfaces. Menus follow the app's font and rounded selection styling; confirmation dialogs share the panels' corner radius. Both sidebar states have extra padding and a scrollbar gutter; Settings and Update stay icon-only, stacked when collapsed and side by side when expanded.
 
 Requires the Go version pinned in `go.mod`. Run `./build.ps1` to test, run MyGo's UI checks, and build the Windows application and installer. `go tool mygo build` also builds directly.
 
 GitHub Actions runs the same checks and Windows build on pushes, pull requests, and manual runs. Download the `bentomail-windows-amd64` artifact from the workflow run for the app, installer, and required resources.
 
-After a successful push or manual run on the default branch, the workflow also publishes a GitHub Release tagged `build-<run number>` for the exact built commit. Each release includes `bentomail-windows-amd64.zip` with the app and resources, plus the standalone installer. Rerunning the workflow updates the same release's assets. Pull requests and other branches only build and upload workflow artifacts.
+After a successful push or manual run on the default branch, the workflow also publishes a GitHub Release tagged `build-0.2.<run number>` for the exact built commit, matching the versioned URLs in the signed update manifest. Each release includes `bentomail-windows-amd64.zip` with the app and resources, plus the standalone installer. Rerunning the workflow updates the same release's assets. Pull requests and other branches only build and upload workflow artifacts.
+
+The sidebar toggle switches between the resizable sidebar and a compact icon rail, and remembers the choice. The account switcher displays initials avatars beside each account name and address. The composer schedule field shows its full date/time placeholder.
+
+**Update app** in the sidebar opens MyGo's native updater to check, download, verify, install, and restart. Background checks run daily. Starting with 0.2, builds embed the update public key and find signed manifests on `build-` releases in `Ahdeyyy/bentomail`. CI assigns version `0.2.<run number>` and signs using the `MYGO_UPDATER_PRIVATE_KEY` Actions secret; releases include `update-windows-amd64.json` and its signed archive. Keep the signing key backed up outside the repository. Local signed builds need the same private key in `MYGO_UPDATER_PRIVATE_KEY`. Development builds report that updates are unavailable. Existing 0.1 installations need this version installed once to gain the updater.
+
+SMTP submission pairs port 587 (and 25) with STARTTLS and port 465 with direct TLS, correcting older saved accounts at connection time and on their next save. Custom ports retain the selected security mode. TLS certificate validation remains required, and failed encryption never falls back to plaintext. Failed Outbox messages can be retried with **Send now** after upgrading; uncertain deliveries still require checking Sent before retrying.
 
 ```powershell
 $env:CGO_ENABLED = '0'

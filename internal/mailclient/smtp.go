@@ -20,21 +20,43 @@ type smtpClient struct {
 	host   string
 }
 
-func dialSMTP(ctx context.Context, host string, port int, mode string) (*smtpClient, error) {
+// SMTPTransport pairs standard submission ports with their encrypted protocol.
+// Older accounts could inherit "TLS" while using the STARTTLS port (587).
+// Custom ports retain their explicit security mode; None is never upgraded or
+// used as a fallback after a failed TLS handshake.
+func SMTPTransport(port int, mode string) (int, string) {
 	if mode == "" {
-		mode = "TLS"
-	}
-	if mode != "TLS" && mode != "STARTTLS" && mode != "None" {
-		return nil, fmt.Errorf("unknown SMTP security mode %q", mode)
-	}
-	if mode == "None" && !isLoopback(host) {
-		return nil, errors.New("unencrypted SMTP is allowed only on loopback")
+		mode = "STARTTLS"
+		if port == 465 {
+			mode = "TLS"
+		}
 	}
 	if port == 0 {
 		port = 587
 		if mode == "TLS" {
 			port = 465
 		}
+	}
+	if mode == "TLS" && (port == 587 || port == 25) {
+		mode = "STARTTLS"
+	}
+	if mode == "STARTTLS" && port == 465 {
+		mode = "TLS"
+	}
+	return port, mode
+}
+
+func dialSMTP(ctx context.Context, host string, port int, mode string) (*smtpClient, error) {
+	return dialSMTPWithTLS(ctx, host, port, mode, &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12})
+}
+
+func dialSMTPWithTLS(ctx context.Context, host string, port int, mode string, conf *tls.Config) (*smtpClient, error) {
+	port, mode = SMTPTransport(port, mode)
+	if mode != "TLS" && mode != "STARTTLS" && mode != "None" {
+		return nil, fmt.Errorf("unknown SMTP security mode %q", mode)
+	}
+	if mode == "None" && !isLoopback(host) {
+		return nil, errors.New("unencrypted SMTP is allowed only on loopback")
 	}
 	d := net.Dialer{Timeout: 20 * time.Second}
 	conn, err := d.DialContext(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(port)))
@@ -49,10 +71,13 @@ func dialSMTP(ctx context.Context, host string, port int, mode string) (*smtpCli
 	rawConn := conn
 	stop := context.AfterFunc(ctx, func() { _ = rawConn.Close() })
 	fail := func(err error) (*smtpClient, error) { stop(); _ = conn.Close(); return nil, err }
-	conf := &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}
 	if mode == "TLS" {
 		secure := tls.Client(conn, conf)
 		if err := secure.HandshakeContext(ctx); err != nil {
+			var recordErr tls.RecordHeaderError
+			if errors.As(err, &recordErr) {
+				return fail(fmt.Errorf("SMTP server %s:%d does not speak direct TLS; choose STARTTLS (usually port 587) in account settings: %w", host, port, err))
+			}
 			return fail(err)
 		}
 		conn = secure

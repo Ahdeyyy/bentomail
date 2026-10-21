@@ -16,7 +16,7 @@ func TestTranslucencyPreferenceMigration(t *testing.T) {
 	for _, tc := range []struct {
 		data string
 		want float64
-	}{{`{"Dark":true}`, 65}, {`{"Translucency":0}`, 0}, {`{"Translucency":100}`, 100}} {
+	}{{`{"Dark":true}`, 65}, {`{"Translucency":0}`, 0}, {`{"Translucency":100}`, 65}, {`{"Translucency":70}`, 65}, {`{"Translucency":-10}`, 0}} {
 		var prefs mailclient.Preferences
 		if err := json.Unmarshal([]byte(tc.data), &prefs); err != nil {
 			t.Fatal(err)
@@ -55,6 +55,59 @@ func TestFrostedSurfaceBlurAndButtonOpacity(t *testing.T) {
 	}
 }
 
+func TestFrostedPopupObscuresBackdropDetails(t *testing.T) {
+	// Text strokes and the spaces between them should merge into a soft
+	// backdrop instead of showing sharp edges through a floating surface.
+	for _, dark := range []bool{false, true} {
+		theme := workspaceTheme(dark, "Indigo", 100)
+		view := func(c *ui.Context) {
+			c.SetTheme(theme)
+			c.Root().Background(ui.Hex("#000000"))
+			for x := 0; x < 240; x += 12 {
+				ui.Box(c).Absolute().Left(float32(x)).Top(0).Size(6, 120).Background(ui.Hex("#ffffff"))
+			}
+			frost(ui.Box(c), overlaySurface(theme)).Absolute().Left(20).Top(20).Size(200, 80).Radius(10)
+		}
+		img := ui.NewTester(view, 240, 120).Image()
+		lo, hi := uint8(255), uint8(0)
+		for x := 60; x < 180; x++ {
+			v := img.RGBAAt(x, 60).R
+			lo, hi = min(lo, v), max(hi, v)
+		}
+		if hi-lo > 6 {
+			t.Fatalf("backdrop strokes still visible in popup (dark=%v): %d..%d", dark, lo, hi)
+		}
+	}
+}
+
+func TestFrostedSelectKeyboardAndComposerFallback(t *testing.T) {
+	a := seededApp(t)
+	a.page, a.settingsTab = "settings", "Appearance"
+	tt := ui.NewTester(a.view, 1000, 680)
+	if err := tt.Click("Indigo"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText("Teal") {
+		t.Fatal("accent dropdown did not open")
+	}
+	tt.Key(0, ui.KeyDown)
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	tt.Frame()
+	if a.prefs.Accent != "Teal" {
+		t.Fatalf("keyboard selection failed: %q", a.prefs.Accent)
+	}
+	a.prefs.Translucency = 100
+	a.savePrefs()
+	a.newComposer(nil, "new")
+	tt.Frame()
+	tt.Frame()
+	if _, _, _, alpha := tt.Image().At(2, 300).RGBA(); alpha != 65535 {
+		t.Fatal("recipient autocomplete removed the opaque window fallback")
+	}
+}
+
 func TestTranslucencySurvivesStoreReopen(t *testing.T) {
 	for _, level := range []float64{0, 65, 100} {
 		dir := t.TempDir()
@@ -75,7 +128,7 @@ func TestTranslucencySurvivesStoreReopen(t *testing.T) {
 		}
 		got := reopened.Snapshot().Preferences.Translucency
 		reopened.Close()
-		if got != level {
+		if got != normalizedTranslucency(level) {
 			t.Fatalf("reopened translucency = %v, want %v", got, level)
 		}
 	}
@@ -96,10 +149,15 @@ func TestTranslucencyControlPersistsAndRestores(t *testing.T) {
 	}
 	tt.Key(0, ui.KeyEnd)
 	tt.Frame()
-	if a.prefs.Translucency != 100 || a.theme.Background.A >= 100 || surface(a.theme).A >= 150 {
+	if a.prefs.Translucency != 65 || a.theme.Background != workspaceTheme(false, "Indigo", 65).Background {
 		t.Fatalf("frosted endpoint not applied: %v, %+v", a.prefs.Translucency, a.theme)
 	}
-	if got := newApp(a.store).prefs.Translucency; got != 100 {
+	tt.Key(0, ui.KeyRight)
+	tt.Frame()
+	if a.prefs.Translucency != 65 {
+		t.Fatal("slider exceeded 65%")
+	}
+	if got := newApp(a.store).prefs.Translucency; got != 65 {
 		t.Fatalf("preference not restored: %v", got)
 	}
 	// The root must regain an opaque background when no OS material exists.

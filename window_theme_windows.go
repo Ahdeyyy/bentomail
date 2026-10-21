@@ -147,7 +147,7 @@ func menuWindowProc(hwnd, msg, wp, lp, id, ref uintptr) uintptr {
 						s.backdrops = map[uintptr]*menuBackdrop{}
 					}
 					if _, captured := s.backdrops[wp]; !captured {
-						s.backdrops[wp] = captureMenuBackdrop(max(1, int(s.px(6))/4))
+						s.backdrops[wp] = captureMenuBackdrop(max(1, int(s.px(backdropBlurRadius))/4))
 					}
 				}
 			} // Leave the OS system menu alone.
@@ -192,7 +192,7 @@ func menuWindowProc(hwnd, msg, wp, lp, id, ref uintptr) uintptr {
 
 func colorRef(c ui.Color) uintptr { return uintptr(c.R) | uintptr(c.G)<<8 | uintptr(c.B)<<16 }
 func menuSurface(t *ui.Theme) ui.Color {
-	return surface(t)
+	return overlaySurface(t)
 }
 
 func (s *windowMenuTheme) stylePopup(hwnd uintptr) {
