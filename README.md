@@ -1,10 +1,12 @@
 # Bentomail
 
-A native Windows IMAP/SMTP mail client built with Go and MyGo 0.5.5. Mail, drafts, attachments, tags, and the search index live on your PC. The interface retains localmailhost's Martian Grotesk typography and cool indigo light/dark palette.
+A native IMAP/SMTP mail client built with Go and MyGo 0.5.5. Builds cover Windows and Linux on x64/ARM64, and macOS on Intel/Apple Silicon with a universal app. Mail, drafts, attachments, tags, and the search index live on your computer. Saved-credential encryption currently requires Windows DPAPI; account passwords and OAuth tokens cannot yet be saved on Linux or macOS. The interface retains localmailhost's Martian Grotesk typography and cool indigo light/dark palette.
 
 ## Run
 
 Open `build/windows-amd64/bentomail.exe`, or install with the `bentomail Setup` executable in the same directory. The Windows installer is unsigned; in-app update archives are signed separately.
+
+GitHub Releases include Windows installers and app archives for both architectures, Linux `.deb` packages and archives for both architectures, and a universal macOS `.dmg` and app archive. The macOS app is signed ad hoc and is not notarized.
 
 For development:
 
@@ -82,15 +84,21 @@ Regenerate the original concept gallery with `node scripts/create_logos.mjs`. Re
 
 In **Settings → Appearance**, adjust **Translucency** from 0% (opaque) to a maximum of 65% (frosted). The default is 65%; older saved or restored values above 65% are capped automatically. Changes apply immediately and persist across launches and backups. Windows 11 22H2 and later use native Acrylic blur, with a solid window background on systems without native materials. Translucent panes, dropdowns, and dialogs soften their backdrop with a 32 DIP blur, while button faces remain at least 94% opaque. Floating surfaces retain at least 80% tint opacity so background text cannot compete with their labels; recipient suggestions use a solid surface. Native menus, context menus, and their item highlights blend over a similarly strong blurred background captured when each popup opens; menu text stays opaque. These temporary captures remain in memory until the menu closes, and unavailable capture falls back to solid menu surfaces. Menus follow the app's font and rounded selection styling; confirmation dialogs share the panels' corner radius. Both sidebar states have extra padding and a scrollbar gutter; Settings and Update stay icon-only, stacked when collapsed and side by side when expanded.
 
-Requires the Go version pinned in `go.mod`. Run `./build.ps1` to test, run MyGo's UI checks, and build the Windows application and installer. `go tool mygo build` also builds directly.
+Requires the Go version pinned in `go.mod`. Run `./build.ps1` on Windows to test, run MyGo's UI checks, and build the application and installer. `go tool mygo build` builds directly for the current platform. To cross-compile all desktop targets:
 
-GitHub Actions runs the same checks and Windows build on pushes, pull requests, and manual runs. Download the `bentomail-windows-amd64` artifact from the workflow run for the app, installer, and required resources.
+```sh
+go tool mygo build -platform windows/amd64,windows/arm64,linux/amd64,linux/arm64,darwin/universal
+```
 
-After a successful push or manual run on the default branch, the workflow also publishes a GitHub Release tagged `build-0.2.<run number>` for the exact built commit, matching the versioned URLs in the signed update manifest. Each release includes `bentomail-windows-amd64.zip` with the app and resources, plus the standalone installer. Rerunning the workflow updates the same release's assets. Pull requests and other branches only build and upload workflow artifacts.
+Creating macOS disk images and signing the app requires macOS; Windows installers require NSIS, which MyGo downloads automatically on Windows.
+
+GitHub Actions builds all desktop targets on pushes, pull requests, and manual runs, using one matrix with Windows, Linux, and macOS runners. Tests and MyGo's UI checks run on Windows because credential storage tests use DPAPI. Download the `bentomail-Windows`, `bentomail-Linux`, or `bentomail-macOS` workflow artifact for the apps, installers, and required resources. Icons are checked in; regenerate them with `go run ./cmd/brand-assets` when the artwork changes.
+
+After a successful push or manual run on the default branch, the workflow automatically publishes a GitHub Release whose tag and title are both `bentomail-v<version>`, such as `bentomail-v0.2.5`. The next version increments the highest existing release's patch version; `mygo.json` sets the minimum version, so changing it can start a new minor or major version. Legacy `build-0.2.x` releases count during migration, and drafts reserve their versions. The workflow run number is never used. One version is chosen for every platform, the app version, and the signed archive URLs. All platform builds must succeed, and the publishing script checks every update manifest's version, archive URL, and size before publishing the complete draft release. Rerunning failed jobs can finish interrupted drafts; published versions are left intact. Pull requests and other branches only build and upload workflow artifacts.
 
 The sidebar toggle switches between the resizable sidebar and a compact icon rail, and remembers the choice. The account switcher displays initials avatars beside each account name and address. The composer schedule field shows its full date/time placeholder.
 
-**Update app** in the sidebar opens MyGo's native updater to check, download, verify, install, and restart. Background checks run daily. Starting with 0.2, builds embed the update public key and find signed manifests on `build-` releases in `Ahdeyyy/bentomail`. CI assigns version `0.2.<run number>` and signs using the `MYGO_UPDATER_PRIVATE_KEY` Actions secret; releases include `update-windows-amd64.json` and its signed archive. Keep the signing key backed up outside the repository. Local signed builds need the same private key in `MYGO_UPDATER_PRIVATE_KEY`. Development builds report that updates are unavailable. Existing 0.1 installations need this version installed once to gain the updater.
+**Update app** in the sidebar opens MyGo's native updater to check, download, verify, install, and restart. Background checks run daily. Builds embed the update public key and find signed manifests on `bentomail-v` releases in `Ahdeyyy/bentomail`. CI signs using the `MYGO_UPDATER_PRIVATE_KEY` Actions secret; each target has its own `update-<target>.json` and signed archive, including `update-darwin-universal.json` for both Mac architectures. Keep the signing key backed up outside the repository. Local signed builds need the same private key in `MYGO_UPDATER_PRIVATE_KEY`. Development builds report that updates are unavailable. Installations that use the old `build-` feed, and existing 0.1 installations, need one manual installation of a new release to discover the new feed.
 
 SMTP submission pairs port 587 (and 25) with STARTTLS and port 465 with direct TLS, correcting older saved accounts at connection time and on their next save. Custom ports retain the selected security mode. TLS certificate validation remains required, and failed encryption never falls back to plaintext. Failed Outbox messages can be retried with **Send now** after upgrading; uncertain deliveries still require checking Sent before retrying.
 
