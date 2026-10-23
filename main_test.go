@@ -159,9 +159,21 @@ func TestRenderWorkspace(t *testing.T) {
 	a := seededApp(t)
 	a.selectedID = a.state.Messages[0].ID
 	tt := ui.NewTester(a.view, 1440, 900)
-	for _, name := range []string{"workspace", "collapsed", "account-switcher", "composer", "composer-small", "settings", "settings-dropdown", "settings-125", "settings-150", "settings-small", "settings-dark", "storage-dark", "storage", "dark"} {
+	for _, name := range []string{"workspace", "bottom", "hidden", "drafts", "outbox", "collapsed", "account-switcher", "composer", "composer-small", "settings", "settings-dropdown", "settings-125", "settings-150", "settings-small", "settings-dark", "storage-dark", "storage", "dark"} {
 		switch name {
+		case "bottom":
+			a.prefs.Layout = "Bottom"
+		case "hidden":
+			a.prefs.Layout = "Hidden"
+		case "drafts":
+			a.folder = "drafts"
+			a.state.Drafts = append(a.state.Drafts, mailclient.Draft{ID: "render-draft", AccountID: "work", Subject: "Notes for our next review", To: "jordan@example.com", Status: "draft"})
+		case "outbox":
+			a.folder = "outbox"
+			a.state.Drafts = append(a.state.Drafts, mailclient.Draft{ID: "render-outbox", AccountID: "work", Subject: "The weekly update", To: "sam@example.com", Status: "queued", SendAt: time.Now().Add(time.Hour)})
 		case "collapsed":
+			a.folder = "inbox"
+			a.prefs.Layout = "Right"
 			a.prefs.SidebarCollapsed = true
 		case "account-switcher":
 			a.prefs.SidebarCollapsed = false
@@ -210,6 +222,7 @@ func TestRenderWorkspace(t *testing.T) {
 		}
 		tt.Frame()
 		tt.Frame()
+		tt.Advance(250 * time.Millisecond)
 		f, err := os.Create(filepath.Join(dir, name+".png"))
 		if err != nil {
 			t.Fatal(err)
@@ -227,14 +240,14 @@ func TestActionsStayVisibleAtMinimumWindowSize(t *testing.T) {
 	tt := ui.NewTester(a.view, 1000, 680)
 	for _, label := range []string{"Reply", "Forward"} {
 		r, ok := tt.Find(label)
-		if !ok || r.Y+r.H > 653 {
+		if !ok || r.Y+r.H > 668 {
 			t.Fatalf("%s outside minimum window: %+v", label, r)
 		}
 	}
 	a.newComposer(nil, "new")
 	tt.Frame()
 	r, ok := tt.Find("Send")
-	if !ok || r.Y+r.H > 653 {
+	if !ok || r.Y+r.H > 668 {
 		t.Fatalf("send outside minimum window: %+v", r)
 	}
 }

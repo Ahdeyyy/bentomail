@@ -43,9 +43,13 @@ type app struct {
 	accountID, accountPick, folder, page, query, selectedID, filter         string
 	sortOldest, threaded                                                    bool
 	list                                                                    ui.ListState
+	sidebarMotion                                                           sidebarMotion
+	avatarMotion                                                            avatarMotion
 	rowIndex                                                                int
 	selection                                                               ui.Selection[string]
 	searchHandle                                                            ui.Handle
+	mailMenu                                                                mailMenuState
+	mailMenuTrigger                                                         ui.Handle
 	focus                                                                   string
 	preview                                                                 ui.NativeWebView
 	loadHTML                                                                func(string)
@@ -109,6 +113,7 @@ func newApp(s *mailclient.Store) *app {
 		a.prefs.Accent = "Indigo"
 	}
 	a.prefs.Translucency = normalizedTranslucency(a.prefs.Translucency)
+	a.prefs.AnimationSpeed = mailclient.NormalizeAnimationSpeed(a.prefs.AnimationSpeed)
 	a.theme = workspaceTheme(a.prefs.Dark, a.prefs.Accent, a.prefs.Translucency)
 	a.list.Selected = &a.rowIndex
 	a.list.Selection = &a.selection
@@ -510,6 +515,7 @@ func initials(s string) string {
 }
 func (a *app) savePrefs() {
 	a.prefs.Translucency = normalizedTranslucency(a.prefs.Translucency)
+	a.prefs.AnimationSpeed = mailclient.NormalizeAnimationSpeed(a.prefs.AnimationSpeed)
 	p, s := a.prefs, a.store
 	a.theme = workspaceTheme(p.Dark, p.Accent, p.Translucency)
 	a.run("Preferences saved", func() error { return s.SavePreferences(p) })

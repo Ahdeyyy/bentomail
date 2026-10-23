@@ -3,6 +3,7 @@
 package main
 
 import (
+	"fmt"
 	"image"
 	"image/png"
 	"os"
@@ -14,6 +15,45 @@ import (
 
 	"github.com/egoist/mygo/ui"
 )
+
+func TestNativeMenuHeightLimitKeepsOverflowCommands(t *testing.T) {
+	menu, _, err := menuUser.NewProc("CreatePopupMenu").Call()
+	if menu == 0 {
+		t.Fatal(err)
+	}
+	defer menuUser.NewProc("DestroyMenu").Call(menu)
+	for i := 0; i < 40; i++ {
+		label := syscall.StringToUTF16Ptr(fmt.Sprintf("Move to folder %d", i))
+		if ok, _, err := menuUser.NewProc("AppendMenuW").Call(menu, 0, uintptr(i+1), uintptr(unsafe.Pointer(label))); ok == 0 {
+			t.Fatal(err)
+		}
+	}
+	theme := workspaceTheme(true, "Indigo")
+	s := &windowMenuTheme{theme: func() *ui.Theme { return theme }, items: map[uintptr]themedMenuItem{}}
+	defer func() { deleteObject.Call(s.font); deleteObject.Call(s.background) }()
+	for i := 0; i < 2; i++ {
+		s.prepare(0, menu)
+		info := menuInfo{Mask: 1} // MIM_MAXHEIGHT: Windows scrolls overflow at this height.
+		info.Size = uint32(unsafe.Sizeof(info))
+		if ok, _, err := menuUser.NewProc("GetMenuInfo").Call(menu, uintptr(unsafe.Pointer(&info))); ok == 0 {
+			t.Fatal(err)
+		}
+		if info.MaxHeight != uint32(s.px(400)) {
+			t.Fatalf("native popup height is not capped at 400 DIPs: %d", info.MaxHeight)
+		}
+		count, _, _ := getMenuItemCount.Call(menu)
+		if count != 40 {
+			t.Fatalf("overflow commands were removed: %d", count)
+		}
+		last := menuItemInfo{Mask: 0x20 | 0x2} // MIIM_DATA | MIIM_ID
+		last.Size = uint32(unsafe.Sizeof(last))
+		getMenuItemInfo.Call(menu, 39, 1, uintptr(unsafe.Pointer(&last)))
+		if last.ID != 40 || s.items[last.Data].label != "Move to folder 39" {
+			t.Fatal("last scrollable command lost its label or command ID")
+		}
+		theme = workspaceTheme(false, "Teal")
+	}
+}
 
 func TestNativeMenuRoundedHighlight(t *testing.T) {
 	runtime.LockOSThread()

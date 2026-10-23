@@ -113,6 +113,7 @@ type Preferences struct {
 	RecentDays          int
 	Dark                bool
 	Translucency        float64
+	AnimationSpeed      float64
 	Accent              string
 	Density             string
 	ReadingSize         int
@@ -134,6 +135,19 @@ type Preferences struct {
 const DefaultTranslucency = 65
 const MaxTranslucency = 65
 
+const (
+	DefaultAnimationSpeed = 1
+	MinAnimationSpeed     = 0.25
+	MaxAnimationSpeed     = 2
+)
+
+func NormalizeAnimationSpeed(value float64) float64 {
+	if value == 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+		return DefaultAnimationSpeed
+	}
+	return max(MinAnimationSpeed, min(MaxAnimationSpeed, value))
+}
+
 func NormalizeTranslucency(value float64) float64 {
 	if math.IsNaN(value) || math.IsInf(value, 0) {
 		return DefaultTranslucency
@@ -145,12 +159,13 @@ func NormalizeTranslucency(value float64) float64 {
 // (opaque), including when restoring a backup.
 func (p *Preferences) UnmarshalJSON(data []byte) error {
 	type preferences Preferences
-	value := preferences{Translucency: DefaultTranslucency}
+	value := preferences{Translucency: DefaultTranslucency, AnimationSpeed: DefaultAnimationSpeed}
 	if err := json.Unmarshal(data, &value); err != nil {
 		return err
 	}
 	*p = Preferences(value)
 	p.Translucency = NormalizeTranslucency(p.Translucency)
+	p.AnimationSpeed = NormalizeAnimationSpeed(p.AnimationSpeed)
 	return nil
 }
 

@@ -7,11 +7,59 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/richtext"
 )
+
+func TestToolbarSharesTitlebarWithNativeControls(t *testing.T) {
+	for _, bar := range []ui.TitleBar{{Height: 36, Right: 138}, {Height: 28, Left: 80}} {
+		for _, collapsed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("left=%g/right=%g/collapsed=%v", bar.Left, bar.Right, collapsed), func(t *testing.T) {
+				a := seededApp(t)
+				a.prefs.SidebarCollapsed = collapsed
+				tt := ui.NewTester(a.view, 1000, 680)
+				tt.SetTitleBar(bar)
+				header, ok := tt.Find("Window titlebar")
+				if !ok || header.H != max(windowTitlebarHeight, bar.Height) {
+					t.Fatalf("unexpected titlebar: %+v", header)
+				}
+				for _, label := range []string{"Search mail", "Sync mail", "Add account"} {
+					r, ok := tt.Find(label)
+					if !ok || r.Y < header.Y || r.Y+r.H > header.Y+header.H || r.X < bar.Left || r.X+r.W > 1000-bar.Right {
+						t.Fatalf("%s does not fit beside the native controls: %+v", label, r)
+					}
+				}
+				compose, ok := tt.Find("Compose")
+				if !ok || compose.Y != header.Y+header.H+8 {
+					t.Fatalf("unused toolbar space above sidebar: %+v", compose)
+				}
+				tt.Key(ui.Ctrl, ui.KeyF)
+				tt.Type("timeline")
+				if a.query != "timeline" {
+					t.Fatal("titlebar search lost keyboard input")
+				}
+				if err := tt.Click("Add account"); err != nil {
+					t.Fatal(err)
+				}
+				if a.page != "settings" || a.settingsTab != "Accounts" {
+					t.Fatal("titlebar action did not open account settings")
+				}
+				canceled := false
+				a.syncing, a.syncCancel = true, func() { canceled = true }
+				tt.Frame()
+				if err := tt.Click("Cancel synchronization"); err != nil {
+					t.Fatal(err)
+				}
+				if !canceled {
+					t.Fatal("titlebar sync action did not receive the click")
+				}
+			})
+		}
+	}
+}
 
 func TestSidebarKeyboardFocusOutline(t *testing.T) {
 	for _, collapsed := range []bool{false, true} {
@@ -108,6 +156,7 @@ func TestSidebarCollapseAndAccountSwitcher(t *testing.T) {
 		if err := tt.Click("Collapse sidebar"); err != nil {
 			t.Fatal(err)
 		}
+		tt.Advance(300 * time.Millisecond)
 		tt.Frame()
 		tt.Frame()
 		if !a.prefs.SidebarCollapsed || !a.store.Snapshot().Preferences.SidebarCollapsed {
@@ -121,6 +170,13 @@ func TestSidebarCollapseAndAccountSwitcher(t *testing.T) {
 		if tt.HasText("WORKSPACE") || tt.HasText("bentomail") {
 			t.Fatal("collapsed sidebar still shows labels")
 		}
+		avatar, ok := tt.Find("Active account")
+		if !ok || avatar.W != 36 || avatar.X+avatar.W > 80 || avatar.Y < 340 {
+			t.Fatalf("account trigger is not an avatar in the rail footer: %+v", avatar)
+		}
+		if _, ok := tt.Find("All accounts"); ok {
+			t.Fatal("closed account switcher exposes account labels")
+		}
 		if err := tt.Click("Inbox"); err != nil {
 			t.Fatal(err)
 		}
@@ -128,6 +184,10 @@ func TestSidebarCollapseAndAccountSwitcher(t *testing.T) {
 			t.Fatal(err)
 		}
 		tt.Frame()
+		popup, ok := tt.Find("Account choices")
+		if !ok || popup.Y+popup.H > avatar.Y || popup.X < 0 || popup.X+popup.W > 1000 {
+			t.Fatalf("footer popup is clipped or did not open upward: %+v", popup)
+		}
 		if _, ok := tt.Find("Account avatar for Alex Morgan"); !ok {
 			t.Fatal("account option has no avatar")
 		}
@@ -147,10 +207,18 @@ func TestSidebarCollapseAndAccountSwitcher(t *testing.T) {
 		if err := tt.Click("Expand sidebar"); err != nil {
 			t.Fatal(err)
 		}
+		tt.Advance(300 * time.Millisecond)
 		tt.Frame()
 		tt.Frame()
 		if a.prefs.SidebarCollapsed || a.prefs.SidebarWidth != 245 {
 			t.Fatal("expanding lost sidebar width")
+		}
+		avatar, ok = tt.Find("Active account")
+		if !ok || avatar.W != 36 || avatar.X+avatar.W > 245 || avatar.Y < 340 {
+			t.Fatalf("account trigger left the expanded footer: %+v", avatar)
+		}
+		if tt.HasText("bentomail") {
+			t.Fatal("expanded sidebar still shows branding")
 		}
 	}
 }

@@ -75,21 +75,22 @@ func Open(dir string) (*Store, error) {
 			Templates:     make(map[string]string),
 			Folders:       make(map[string][]string),
 			Preferences: Preferences{
-				Translucency: DefaultTranslucency,
-				Density:      "Comfortable",
-				ReadingSize:  14,
-				PreviewLines: 2,
-				Layout:       "Right",
-				SidebarWidth: 220,
-				ListWidth:    320,
-				Notify:       true,
-				RemoteImages: false,
-				SyncMinutes:  5,
-				SendDelay:    10,
-				FullSync:     true,
-				RecentDays:   30,
-				ReadMode:     "Immediately",
-				ReadingFont:  "Martian Grotesk",
+				Translucency:   DefaultTranslucency,
+				AnimationSpeed: DefaultAnimationSpeed,
+				Density:        "Comfortable",
+				ReadingSize:    14,
+				PreviewLines:   2,
+				Layout:         "Right",
+				SidebarWidth:   220,
+				ListWidth:      320,
+				Notify:         true,
+				RemoteImages:   false,
+				SyncMinutes:    5,
+				SendDelay:      10,
+				FullSync:       true,
+				RecentDays:     30,
+				ReadMode:       "Immediately",
+				ReadingFont:    "Martian Grotesk",
 			},
 		},
 	}
@@ -407,6 +408,7 @@ func (s *Store) DeleteDraft(id string) error {
 // SavePreferences updates user preferences.
 func (s *Store) SavePreferences(p Preferences) error {
 	p.Translucency = NormalizeTranslucency(p.Translucency)
+	p.AnimationSpeed = NormalizeAnimationSpeed(p.AnimationSpeed)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

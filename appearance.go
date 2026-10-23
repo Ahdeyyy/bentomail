@@ -3,6 +3,7 @@ package main
 import (
 	_ "embed"
 	"fmt"
+	"time"
 
 	"bentomail/internal/mailclient"
 	"github.com/egoist/mygo"
@@ -115,7 +116,38 @@ func frost(e ui.Element, color ui.Color) ui.Element {
 	return e.Background(color)
 }
 func panel(c *ui.Context, e ui.Element) ui.Element {
-	return frost(e, surface(c.Theme())).Radius(panelRadius).Border(1, c.Theme().Border).Clip()
+	return frost(e, surface(c.Theme())).Radius(panelRadius).Border(1, c.Theme().Border.Alpha(.45)).
+		Shadow(0, 2, 8, 0, c.Theme().Text.Alpha(.04)).Clip().Transition(ui.ElementTransition{
+		Duration: 180 * time.Millisecond, Colors: true, Enter: &ui.Motion{Y: 5},
+	})
+}
+
+// MyGo honors the desktop's reduced-motion preference for these transitions.
+func controlTransition() ui.ElementTransition {
+	return ui.ElementTransition{Duration: 140 * time.Millisecond, Colors: true}
+}
+
+func popupTransition() ui.ElementTransition {
+	return ui.ElementTransition{Duration: 160 * time.Millisecond, Colors: true, Enter: &ui.Motion{Y: 4, Scale: .98}}
+}
+
+// Keep native split handles and keyboard resizing, with an open gutter between
+// the floating panes. The divider still picks up the accent on hover or drag.
+func paneSplit(c *ui.Context, size *float32, vertical bool, first, second func()) ui.Element {
+	t := c.Theme()
+	gutter := *t
+	gutter.Border = ui.Transparent
+	setWindowTheme(c, &gutter)
+	left := func() { setWindowTheme(c, t); first() }
+	right := func() { setWindowTheme(c, t); second() }
+	var e ui.Element
+	if vertical {
+		e = ui.SplitVertical(c, size, left, right)
+	} else {
+		e = ui.Split(c, size, left, right)
+	}
+	setWindowTheme(c, t)
+	return e
 }
 
 func setWindowTheme(c *ui.Context, t *ui.Theme) {
@@ -187,7 +219,7 @@ func selectInput(c *ui.Context, selected *string, options []string) ui.Element {
 		ui.Icon(c, icon("dropdown")).Size(12, 12).Shrink(0)
 	})
 	sel.Popup(func(p ui.Element) {
-		frost(p, overlaySurface(t)).Margin(t.Space(1), 0, 0, 0).Padding(t.Space(1)).Radius(t.Radius+2).
+		frost(p, overlaySurface(t)).Transition(popupTransition()).Margin(t.Space(1), 0, 0, 0).Padding(t.Space(1)).Radius(t.Radius+2).
 			Border(1, t.Border).Shadow(0, 6, 20, 0, ui.RGBA(0, 0, 0, .18))
 		for _, option := range options {
 			item := sel.Item(option).Padding(t.Space(1.5), t.Space(2.5)).Radius(t.Radius)
@@ -219,7 +251,7 @@ func iconButton(c *ui.Context, name, label string, fn func()) ui.Element {
 }
 
 func iconButtonBase(c *ui.Context, name, label string, fn func()) ui.Element {
-	b := ui.ButtonBase(c).Label(label).Size(32, 32).Radius(7).Center().OnClick(fn)
+	b := ui.ButtonBase(c).Label(label).Size(32, 32).Radius(7).Center().Transition(controlTransition()).OnClick(fn)
 	if b.Hovered() {
 		b.Background(c.Theme().SurfaceHover)
 	}
@@ -231,7 +263,7 @@ func iconButtonBase(c *ui.Context, name, label string, fn func()) ui.Element {
 // focus ring. Keep sidebar outlines inside the button, including when the
 // keyboard scrolls the first or last visible item into view.
 func sidebarFocus(c *ui.Context, b ui.Element, primary bool) ui.Element {
-	b.FocusRing(false)
+	b.FocusRing(false).Transition(controlTransition())
 	if b.FocusVisible() {
 		color := c.Theme().Focus
 		if primary {
@@ -256,11 +288,17 @@ func sidebarTooltip(c *ui.Context, b ui.Element, label string) {
 	})
 }
 func action(c *ui.Context, name, label string, primary bool, fn func()) ui.Element {
-	b := ui.ButtonBase(c).Label(label).Padding(9, 12).Gap(7).Radius(8).AlignSelf(ui.Start).Shrink(0).OnClick(fn)
+	b := ui.ButtonBase(c).Label(label).Padding(9, 12).Gap(7).Radius(8).AlignSelf(ui.Start).Shrink(0).Transition(controlTransition()).OnClick(fn)
 	if primary {
 		b.Background(c.Theme().Accent).TextColor(c.Theme().AccentText)
+		if b.Hovered() {
+			b.Background(c.Theme().AccentHover)
+		}
 	} else {
 		b.Background(c.Theme().Surface).TextColor(c.Theme().Text)
+		if b.Hovered() {
+			b.Background(c.Theme().SurfaceHover)
+		}
 	}
 	b.Children(func() {
 		ui.Icon(c, icon(name)).Size(16, 16).Shrink(0)
@@ -269,10 +307,10 @@ func action(c *ui.Context, name, label string, primary bool, fn func()) ui.Eleme
 	return b
 }
 
-const windowTitlebarHeight = 36
+const windowTitlebarHeight = 44
 
 // Keep the OS title for task switching and accessibility, while the client
-// draws the sidebar header and a titlebar beneath the native window controls.
+// draws its toolbar beside the native window controls.
 func newAppWindow(opts mygo.WindowOptions, theme func() *ui.Theme) *mygo.Window {
 	opts.TitleBarStyle = mygo.TitleBarHidden
 	opts.TitleBarHeight = windowTitlebarHeight

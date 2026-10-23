@@ -24,6 +24,42 @@ func TestClickMailRowOpensLocalBody(t *testing.T) {
 	}
 }
 
+func TestHiddenReadingPaneCanReopenSameMessage(t *testing.T) {
+	for _, density := range []string{"Comfortable", "Compact"} {
+		t.Run(density, func(t *testing.T) {
+			a := seededApp(t)
+			a.prefs.Layout, a.prefs.Density = "Hidden", density
+			tt := ui.NewTester(a.view, 1000, 680)
+			m := a.messages()[0]
+			for i := 0; i < 3; i++ {
+				if err := tt.Click(m.Subject); err != nil {
+					t.Fatal(err)
+				}
+				tt.Frame()
+				if a.selectedID != m.ID || !tt.HasText(m.Text) {
+					t.Fatalf("opening the same message failed on attempt %d", i+1)
+				}
+				if err := tt.Click("Back to messages"); err != nil {
+					t.Fatal(err)
+				}
+				tt.Frame()
+				tt.Frame()
+				if a.selectedID != "" {
+					t.Fatal("Back did not return to the list")
+				}
+				if !tt.Focused("Message list") {
+					t.Fatal("Back did not restore keyboard focus to the list")
+				}
+			}
+			tt.Key(0, ui.KeyDown)
+			tt.Frame()
+			if a.selectedID != m.ID {
+				t.Fatal("keyboard navigation could not reopen the first message after Back")
+			}
+		})
+	}
+}
+
 func TestMailSelectionAndDragHandle(t *testing.T) {
 	for _, density := range []string{"Comfortable", "Compact"} {
 		t.Run(density, func(t *testing.T) {
@@ -106,6 +142,8 @@ func TestAppearanceReadingControls(t *testing.T) {
 	a := seededApp(t)
 	a.page, a.settingsTab = "settings", "Appearance"
 	tt := ui.NewTester(a.view, 1440, 900)
+	// Reading controls follow the appearance sliders in the scrollable panel.
+	tt.Scroll(1000, 500, 0, 400)
 	beforeSize, beforeLines := a.prefs.ReadingSize, a.prefs.PreviewLines
 	for _, label := range []string{"Smaller", "Larger", "Fewer", "More"} {
 		if err := tt.Click(label); err != nil {

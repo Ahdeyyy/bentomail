@@ -530,65 +530,68 @@ func (a *app) sendQueued(d mailclient.Draft) {
 	})
 }
 func (a *app) draftsView(c *ui.Context) {
-	panel(c, ui.Scroll(c)).Fill().Children(func() {
-		ui.Column(c).FillWidth().Padding(16, 24, 16, 16).Gap(10).Children(func() {
-			count := 0
-			for _, d := range a.state.Drafts {
-				if a.accountID != "" && d.AccountID != a.accountID {
-					continue
-				}
-				queued := d.Status != "" && d.Status != "draft"
-				if (a.folder == "outbox") != queued || d.Status == "sent" {
-					continue
-				}
-				count++
-				c.Key(d.ID)
-				frost(ui.Column(c), a.theme.Background).FillWidth().Padding(16).Gap(8).Radius(9).Children(func() {
-					subj := d.Subject
-					if subj == "" {
-						subj = "(No subject)"
+	panel(c, ui.Column(c)).Label("Messages pane").MinWidth(minMessageWidth).Fill().Children(func() {
+		a.mailHeading(c)
+		ui.Scroll(c).Grow(1).FillWidth().MinHeight(0).Children(func() {
+			ui.Column(c).FillWidth().Padding(16, 24, 16, 16).Gap(10).Children(func() {
+				count := 0
+				for _, d := range a.state.Drafts {
+					if a.accountID != "" && d.AccountID != a.accountID {
+						continue
 					}
-					ui.Text(c, subj).FontSize(14).Bold()
-					ui.Text(c, "To: "+d.To).FontSize(11).TextColor(a.theme.TextMuted)
-					state := d.Status
-					if state == "" {
-						state = "draft"
+					queued := d.Status != "" && d.Status != "draft"
+					if (a.folder == "outbox") != queued || d.Status == "sent" {
+						continue
 					}
-					if !d.SendAt.IsZero() {
-						state += " · " + d.SendAt.Local().Format("02 Jan 15:04:05")
-					}
-					ui.Text(c, state).FontSize(10).TextColor(a.theme.Accent)
-					if d.Error != "" {
-						ui.Text(c, d.Error).FontSize(11).TextColor(a.theme.Danger)
-					}
-					ui.Row(c).Gap(8).Children(func() {
-						textButton(c, "Edit draft").Disabled(a.sending[d.ID]).OnClick(func() {
-							if queued {
-								s, edit := a.store, d
-								edit.Status = "draft"
-								edit.SendAt = time.Time{}
-								a.run("Send cancelled", func() error { _, e := s.SaveDraft(edit); return e }, func(err error) {
-									if err == nil {
-										a.openDraft(edit)
-									}
-								})
-							} else {
-								a.openDraft(d)
-							}
-						})
-						if queued && !a.sending[d.ID] {
-							textButton(c, "Send now").OnClick(func() { a.sendQueued(d) })
+					count++
+					c.Key(d.ID)
+					frost(ui.Column(c), a.theme.Background).FillWidth().Padding(16).Gap(8).Radius(9).Children(func() {
+						subj := d.Subject
+						if subj == "" {
+							subj = "(No subject)"
 						}
-						textButton(c, "Discard").Disabled(a.sending[d.ID]).OnClick(func() {
-							s, id := a.store, d.ID
-							a.confirm("Discard message?", "This removes the local draft.", func() { a.run("Draft discarded", func() error { return s.DeleteDraft(id) }) })
+						ui.Text(c, subj).FontSize(14).Bold()
+						ui.Text(c, "To: "+d.To).FontSize(11).TextColor(a.theme.TextMuted)
+						state := d.Status
+						if state == "" {
+							state = "draft"
+						}
+						if !d.SendAt.IsZero() {
+							state += " · " + d.SendAt.Local().Format("02 Jan 15:04:05")
+						}
+						ui.Text(c, state).FontSize(10).TextColor(a.theme.Accent)
+						if d.Error != "" {
+							ui.Text(c, d.Error).FontSize(11).TextColor(a.theme.Danger)
+						}
+						ui.Row(c).Gap(8).Children(func() {
+							textButton(c, "Edit draft").Disabled(a.sending[d.ID]).OnClick(func() {
+								if queued {
+									s, edit := a.store, d
+									edit.Status = "draft"
+									edit.SendAt = time.Time{}
+									a.run("Send cancelled", func() error { _, e := s.SaveDraft(edit); return e }, func(err error) {
+										if err == nil {
+											a.openDraft(edit)
+										}
+									})
+								} else {
+									a.openDraft(d)
+								}
+							})
+							if queued && !a.sending[d.ID] {
+								textButton(c, "Send now").OnClick(func() { a.sendQueued(d) })
+							}
+							textButton(c, "Discard").Disabled(a.sending[d.ID]).OnClick(func() {
+								s, id := a.store, d.ID
+								a.confirm("Discard message?", "This removes the local draft.", func() { a.run("Draft discarded", func() error { return s.DeleteDraft(id) }) })
+							})
 						})
 					})
-				})
-			}
-			if count == 0 {
-				ui.Text(c, "No messages").TextColor(a.theme.TextMuted).Padding(30)
-			}
+				}
+				if count == 0 {
+					ui.Text(c, "No messages").TextColor(a.theme.TextMuted).Padding(30)
+				}
+			})
 		})
 	})
 }

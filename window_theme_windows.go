@@ -18,6 +18,8 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+const menuMaxHeight = 400 // DIPs; longer menus retain native scrolling.
+
 var (
 	menuUser             = syscall.NewLazyDLL("user32.dll")
 	menuGDI              = syscall.NewLazyDLL("gdi32.dll")
@@ -90,6 +92,9 @@ type windowMenuTheme struct {
 }
 
 func installWindowTheme(w *mygo.Window, theme func() *ui.Theme) {
+	if err := suppressSystemCaption(w.NativeHandle()); err != nil {
+		log.Printf("configure hidden title bar: %v", err)
+	}
 	menuFontOnce.Do(func() {
 		data, err := interfaceFonts.ReadFile("resources/fonts/MartianGrotesk-Regular.ttf")
 		if err == nil && len(data) > 0 {
@@ -234,7 +239,8 @@ func (s *windowMenuTheme) prepare(hwnd, menu uintptr) {
 		s.color = bg
 		s.background, _, _ = createBrush.Call(colorRef(bg))
 	}
-	mi := menuInfo{Mask: 2, Background: s.background} // MIM_BACKGROUND
+	// MIM_MAXHEIGHT enables native scrolling instead of filling the screen.
+	mi := menuInfo{Mask: 1 | 2, MaxHeight: uint32(s.px(menuMaxHeight)), Background: s.background}
 	mi.Size = uint32(unsafe.Sizeof(mi))
 	setMenuInfo.Call(menu, uintptr(unsafe.Pointer(&mi)))
 	n, _, _ := getMenuItemCount.Call(menu)

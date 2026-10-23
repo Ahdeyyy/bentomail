@@ -302,6 +302,23 @@ func (a *app) appearanceSettings(c *ui.Context) {
 		})
 	})
 	note(c, "Adjust the frosted background. Changes apply immediately and are saved automatically. Background blur follows system transparency settings; unsupported systems use a solid background.")
+	ui.Column(c.Key("animation-speed-setting")).FillWidth().MaxWidth(400).Gap(6).Children(func() {
+		ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "Animation speed").FontSize(11).Grow(1)
+			ui.Textf(c, "%.2f×", a.prefs.AnimationSpeed).FontSize(11).TextColor(a.theme.TextMuted)
+			textButton(c, "Normal speed").FontSize(10).Padding(3, 6).OnClick(func() {
+				a.prefs.AnimationSpeed = mailclient.DefaultAnimationSpeed
+				a.savePrefs()
+			})
+		})
+		ui.StepSlider(c, &a.prefs.AnimationSpeed, mailclient.MinAnimationSpeed, mailclient.MaxAnimationSpeed, 0.25).
+			Label("Animation speed slider").FillWidth().OnChange(a.savePrefs)
+		ui.Row(c).FillWidth().Children(func() {
+			ui.Text(c, "Slower (0.25×)").FontSize(10).TextColor(a.theme.TextMuted).Grow(1)
+			ui.Text(c, "Faster (2×)").FontSize(10).TextColor(a.theme.TextMuted)
+		})
+	})
+	note(c, "Adjust sidebar and message transition speed. Changes are saved automatically. Reduced motion follows your system settings.")
 	ui.Text(c, "Accent color").FontSize(11)
 	selectInput(c, &a.prefs.Accent, []string{"Indigo", "Teal", "Rose", "Amber", "Violet"}).Label("Accent color").Width(240).OnChange(a.savePrefs)
 	ui.Text(c, "Message density").FontSize(11)

@@ -24,6 +24,9 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
+		// The brand mark occupies x=12..84 in its 96-unit canvas. Crop the
+		// transparent margins for OS icons, retaining a small antialiasing inset.
+		data = bytes.Replace(data, []byte(`viewBox="0 0 96 96"`), []byte(`viewBox="12 12 72 72"`), 1)
 		logo := ui.MustParseSVG(data)
 		theme := ui.LightTheme()
 		theme.Background = ui.Transparent
