@@ -19,6 +19,11 @@ type work struct {
 	fn    func() error
 	done  func(error)
 }
+
+type pendingMailEdit struct {
+	run     uint64
+	message mailclient.Message
+}
 type app struct {
 	store                                                                   *mailclient.Store
 	engine                                                                  *mailclient.Engine
@@ -40,6 +45,8 @@ type app struct {
 	syncProgress                                                            mailclient.SyncProgress
 	syncRun                                                                 uint64
 	syncPending                                                             map[string]bool
+	mailEditRun                                                             uint64
+	mailEdits                                                               map[string]pendingMailEdit
 	watchers                                                                map[string]context.CancelFunc
 	watchConfig                                                             map[string]string
 	lastSync, timeSaved                                                     time.Time
@@ -155,6 +162,7 @@ func (a *app) startWorker(ctx context.Context) {
 					if j.done != nil {
 						j.done(err)
 					}
+					a.applyPendingMailEdits()
 					a.updateAccountPick()
 					a.updatePreview()
 					a.updateBadge()
@@ -244,6 +252,9 @@ func (a *app) tick() {
 	}
 }
 func (a *app) syncMail() {
+	if a.syncing {
+		return
+	}
 	a.syncMailFor(a.accountID)
 }
 
@@ -252,7 +263,9 @@ func (a *app) syncMailFor(accountID string) {
 		return
 	}
 	if a.syncing {
-		if a.syncPending == nil { a.syncPending = map[string]bool{} }
+		if a.syncPending == nil {
+			a.syncPending = map[string]bool{}
+		}
 		a.syncPending[accountID] = true
 		return
 	}
@@ -271,8 +284,8 @@ func (a *app) syncMailFor(accountID string) {
 	dispatch := a.dispatch
 	// Counts can advance rapidly for cached messages. Limit UI dispatches while
 	// always publishing new stages, folders and the final count of each folder.
-	var previous mailclient.SyncProgress
-	var reportedAt time.Time
+	previous := map[string]mailclient.SyncProgress{}
+	reportedAt := map[string]time.Time{}
 	var refreshedAt time.Time
 	report := func(p mailclient.SyncProgress) {
 		if dispatch == nil {
@@ -286,10 +299,11 @@ func (a *app) syncMailFor(accountID string) {
 			refreshedAt = now
 			dispatch(func() { a.receiveSyncState(run, state) })
 		}
-		if p.AccountID == previous.AccountID && p.Folder == previous.Folder && p.Stage == previous.Stage && p.MessagesDone != p.MessagesTotal && now.Sub(reportedAt) < 100*time.Millisecond {
+		prior := previous[p.AccountID]
+		if p.Folder == prior.Folder && p.Stage == prior.Stage && p.MessagesDone != p.MessagesTotal && now.Sub(reportedAt[p.AccountID]) < 100*time.Millisecond {
 			return
 		}
-		previous, reportedAt = p, now
+		previous[p.AccountID], reportedAt[p.AccountID] = p, now
 		dispatch(func() { a.receiveSyncProgress(run, p) })
 	}
 	if !a.network("Mail synchronized", func() error {
@@ -333,21 +347,38 @@ func (a *app) syncMailFor(accountID string) {
 }
 
 func (a *app) receiveSyncState(run uint64, state mailclient.State) {
-	if a.closed || !a.syncing || a.syncRun != run || state.Revision < a.state.Revision { return }
+	if a.closed || !a.syncing || a.syncRun != run || state.Revision < a.state.Revision {
+		return
+	}
 	a.state = state
+	a.applyPendingMailEdits()
 	a.updatePreview()
 	a.updateBadge()
 }
 
+// Keep edits queued behind sync visible while committed download batches are
+// published. Each completed edit removes only its own version of the overlay.
+func (a *app) applyPendingMailEdits() {
+	for i, m := range a.state.Messages {
+		if edit, ok := a.mailEdits[m.ID]; ok {
+			a.state.Messages[i] = edit.message
+		}
+	}
+}
+
 func (a *app) syncNextPending() {
-	if a.closed || len(a.syncPending) == 0 { return }
+	if a.closed || len(a.syncPending) == 0 {
+		return
+	}
 	if a.syncPending[""] {
 		a.syncPending = nil
 		a.syncMailFor("")
 		return
 	}
 	ids := make([]string, 0, len(a.syncPending))
-	for id := range a.syncPending { ids = append(ids, id) }
+	for id := range a.syncPending {
+		ids = append(ids, id)
+	}
 	slices.Sort(ids)
 	delete(a.syncPending, ids[0])
 	a.syncMailFor(ids[0])
@@ -541,12 +572,25 @@ func (a *app) mutate(m mailclient.Message, remote bool) {
 	if remote {
 		run = a.network
 	}
-	run("Message updated", func() error {
+	a.mailEditRun++
+	editRun := a.mailEditRun
+	if a.mailEdits == nil {
+		a.mailEdits = map[string]pendingMailEdit{}
+	}
+	a.mailEdits[m.ID] = pendingMailEdit{run: editRun, message: m}
+	clearEdit := func(error) {
+		if edit, ok := a.mailEdits[m.ID]; ok && edit.run == editRun {
+			delete(a.mailEdits, m.ID)
+		}
+	}
+	if !run("Message updated", func() error {
 		if remote {
 			return e.UpdateMessage(ctx, m, old)
 		}
 		return s.SaveMessage(m)
-	})
+	}, clearEdit) {
+		clearEdit(nil)
+	}
 }
 func (a *app) selectedMessages() []mailclient.Message {
 	var out []mailclient.Message

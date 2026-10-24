@@ -104,3 +104,89 @@ func TestSyncQueueRejectionAndCancellationClearProgress(t *testing.T) {
 	}
 	a.syncCancel()
 }
+
+func TestSyncPublishesCommittedMailAndRejectsStaleSnapshots(t *testing.T) {
+	a := seededApp(t)
+	a.syncing, a.syncRun = true, 3
+	old := a.state
+	if err := a.store.SaveMessage(mailclient.Message{ID: "during-sync", Folder: "INBOX", Subject: "Available before sync ends"}); err != nil {
+		t.Fatal(err)
+	}
+	fresh := a.store.Snapshot()
+	a.receiveSyncState(2, fresh)
+	if a.state.Revision != old.Revision {
+		t.Fatal("previous run published into current sync")
+	}
+	a.receiveSyncState(3, fresh)
+	if len(a.state.Messages) != len(old.Messages)+1 || !a.syncing {
+		t.Fatal("committed mail was not published during sync")
+	}
+	a.receiveSyncState(3, old)
+	if a.state.Revision != fresh.Revision {
+		t.Fatal("older snapshot replaced newer state")
+	}
+	a.syncing = false
+	a.receiveSyncState(3, mailclient.State{Revision: fresh.Revision + 10})
+	if a.state.Revision != fresh.Revision {
+		t.Fatal("finished sync accepted a late snapshot")
+	}
+	a.syncing, a.closed = true, true
+	a.receiveSyncState(3, mailclient.State{Revision: fresh.Revision + 10})
+	if a.state.Revision != fresh.Revision {
+		t.Fatal("closed window accepted sync state")
+	}
+}
+
+func TestSyncRequestsCoalesceAndCancellationDoesNotRestart(t *testing.T) {
+	a := seededApp(t)
+	a.networkJobs = make(chan work, 4)
+	a.syncMailFor("target")
+	a.syncMailFor("other")
+	a.syncMailFor("other")
+	if len(a.syncPending) != 1 || !a.syncPending["other"] {
+		t.Fatal("account notifications were not coalesced")
+	}
+	j := <-a.networkJobs
+	j.done(context.Canceled)
+	if a.syncing || len(a.syncPending) != 0 || len(a.networkJobs) != 0 {
+		t.Fatal("cancellation restarted a pending sync")
+	}
+	a.syncMailFor("target")
+	a.syncMailFor("other")
+	a.syncMailFor("")
+	j = <-a.networkJobs
+	j.done(nil)
+	if !a.syncing || len(a.networkJobs) != 1 || len(a.syncPending) != 0 {
+		t.Fatal("full refresh did not subsume pending account refreshes")
+	}
+	a.syncCancel()
+}
+
+func TestSyncSnapshotsPreserveQueuedMailEdits(t *testing.T) {
+	a := seededApp(t)
+	a.networkJobs = make(chan work, 4)
+	a.syncing, a.syncRun = true, 1
+	m := a.state.Messages[0]
+	m.Starred = !m.Starred
+	a.mutate(m, true)
+	first := <-a.networkJobs
+	a.receiveSyncState(1, a.store.Snapshot())
+	if a.state.Messages[0].Starred != m.Starred {
+		t.Fatal("batch snapshot overwrote queued edit")
+	}
+	m.Read = !m.Read
+	a.mutate(m, true)
+	second := <-a.networkJobs
+	first.done(nil)
+	if _, ok := a.mailEdits[m.ID]; !ok {
+		t.Fatal("earlier completion removed newer edit")
+	}
+	a.receiveSyncState(1, a.store.Snapshot())
+	if a.state.Messages[0].Read != m.Read {
+		t.Fatal("batch snapshot overwrote newer edit")
+	}
+	second.done(nil)
+	if len(a.mailEdits) != 0 {
+		t.Fatal("completed edits retained their overlays")
+	}
+}

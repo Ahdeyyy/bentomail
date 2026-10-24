@@ -122,8 +122,8 @@ func (s *Store) openDatabase() error {
 	return nil
 }
 func (s *Store) persistDatabaseLocked() error {
-	s.state.Revision++
 	state := s.state
+	state.Revision++
 	state.Version = 1
 	state.Messages = nil
 	state.Drafts = nil
@@ -218,6 +218,7 @@ func (s *Store) persistDatabaseLocked() error {
 	if err = tx.Commit(); err != nil {
 		return err
 	}
+	s.state.Revision = state.Revision
 	clear(s.dirtyMessages)
 	clear(s.dirtyMetadata)
 	clear(s.dirtyDrafts)

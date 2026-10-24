@@ -107,6 +107,9 @@ func (e *Engine) syncAccount(ctx context.Context, a Account, progress *SyncProgr
 	}
 	// Stable order for the remaining folders, with Inbox available first.
 	slices.SortStableFunc(folders, func(a, b string) int {
+		if strings.EqualFold(a, b) {
+			return 0
+		}
 		if strings.EqualFold(a, "INBOX") {
 			return -1
 		}
@@ -261,7 +264,6 @@ func (e *Engine) syncFolder(ctx context.Context, c *imapClient, account, folder 
 		if err = flush(); err != nil {
 			return errors.Join(append(errs, err)...)
 		}
-		publish("Saving downloaded mail")
 	}
 	if err = ctx.Err(); err != nil {
 		return errors.Join(append(errs, err)...)

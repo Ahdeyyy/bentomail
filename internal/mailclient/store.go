@@ -9,6 +9,7 @@ import (
 	"net/mail"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -270,6 +271,7 @@ func (s *Store) DeleteAccount(id string, keepMail bool) error {
 		}
 	}
 	s.state.Accounts = newAccounts
+	delete(s.state.SyncModSeq, id)
 	delete(s.secrets, id)
 	if keepMail {
 		for i := range s.state.Messages {
@@ -791,10 +793,13 @@ func (s *Store) RemoveMutation(id string) error {
 func (s *Store) SetFolderList(accountID string, folders []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if slices.Equal(s.state.Folders[accountID], folders) {
+		return nil
+	}
 	if s.state.Folders == nil {
 		s.state.Folders = make(map[string][]string)
 	}
-	s.state.Folders[accountID] = folders
+	s.state.Folders[accountID] = slices.Clone(folders)
 	return s.persistStateLocked()
 }
 

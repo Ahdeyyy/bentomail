@@ -94,15 +94,7 @@ func (e *Engine) TestAccount(ctx context.Context, a Account, password string) er
 func (e *Engine) Send(ctx context.Context, request Draft) error {
 	e.sendMu.Lock()
 	defer e.sendMu.Unlock()
-	var d Draft
-	found := false
-	for _, saved := range e.store.Snapshot().Drafts {
-		if saved.ID == request.ID {
-			d = saved
-			found = true
-			break
-		}
-	}
+	d, found := e.store.draftByID(request.ID)
 	if !found {
 		return errors.New("draft no longer exists")
 	}
@@ -111,6 +103,12 @@ func (e *Engine) Send(ctx context.Context, request Draft) error {
 		return err
 	}
 	defer release()
+	// The draft may have been edited while waiting for this account's sync.
+	current, found := e.store.draftByID(request.ID)
+	if !found || current.AccountID != d.AccountID {
+		return errors.New("draft changed accounts or was removed while waiting; review it before sending")
+	}
+	d = current
 	if d.Status == "sent" || d.Status == "sending" || d.Status == "uncertain" {
 		return errors.New("message was already sent or delivery is uncertain; review it before creating another send")
 	}
@@ -170,7 +168,7 @@ func (e *Engine) Send(ctx context.Context, request Draft) error {
 		return fail(fmt.Errorf("%w: sent copy could not be parsed", ErrDeliveryUncertain))
 	}
 	m.AccountID = a.ID
-	m.Folder = specialFolder(e.store.Snapshot().Folders[a.ID], "sent")
+	m.Folder = specialFolder(e.store.folderNames(a.ID), "sent")
 	m.Read = true
 	m.BCC = d.BCC
 	// SMTP success is recorded before any IMAP work. An interrupted send becomes uncertain on startup.
@@ -179,7 +177,7 @@ func (e *Engine) Send(ctx context.Context, request Draft) error {
 	if err = e.store.completeSend(d, m); err != nil {
 		return fmt.Errorf("%w: could not persist sent receipt: %v", ErrDeliveryUncertain, err)
 	}
-	folder := specialFolder(e.store.Snapshot().Folders[a.ID], "sent")
+	folder := specialFolder(e.store.folderNames(a.ID), "sent")
 	if err = e.store.QueueMutation(RemoteMutation{Type: "append", AccountID: a.ID, Folder: folder, MessageID: m.ID, Data: raw}); err != nil {
 		return fmt.Errorf("sent successfully; could not queue server Sent copy: %w", err)
 	}
@@ -214,7 +212,7 @@ func (e *Engine) Sync(ctx context.Context, accountID string) error {
 
 // SyncProgress describes work within the current account and folder. Message
 // counts include cached messages whose flags are checked, not just downloads.
-// Totals are local to the folder; other accounts have not been queried yet.
+// Totals are local to the folder; other accounts may be syncing concurrently.
 type SyncProgress struct {
 	AccountID, Account, Folder, Stage string
 	AccountIndex, AccountsTotal       int
@@ -319,11 +317,8 @@ func (e *Engine) processMutations(ctx context.Context, c *imapClient, accountID 
 			if err = json.Unmarshal(p.Data, &m); err != nil {
 				return err
 			}
-			for _, latest := range e.store.Snapshot().Messages {
-				if latest.ID == m.ID {
-					m = latest
-					break
-				}
+			if latest, ok := e.store.messageByID(m.ID); ok {
+				m = latest
 			}
 			if p.UID == 0 {
 				break
@@ -332,7 +327,7 @@ func (e *Engine) processMutations(ctx context.Context, c *imapClient, accountID 
 			if selectErr != nil {
 				return selectErr
 			}
-			expected := e.store.Snapshot().UIDValidity[accountID][p.OldFolder]
+			expected := e.store.folderUIDValidity(accountID, p.OldFolder)
 			if expected != 0 && validity != expected {
 				return errors.New("mailbox identity changed; queued change needs review before synchronization")
 			}
@@ -365,7 +360,7 @@ func (e *Engine) processMutations(ctx context.Context, c *imapClient, accountID 
 				target := p.Folder
 				switch strings.ToLower(target) {
 				case "sent", "trash", "archive":
-					target = specialFolder(e.store.Snapshot().Folders[accountID], strings.ToLower(target))
+					target = specialFolder(e.store.folderNames(accountID), strings.ToLower(target))
 				}
 				err = c.MoveMessage(ctx, p.UID, target)
 				if err == nil {

@@ -68,6 +68,10 @@ Large HTML bodies/inline images exceeding the embedded preview budget fall back 
 
 Synchronization keeps normal provider-side copies. Local storage does not automatically remove mail from the server. Removing an account retains downloaded mail in Local archive and removes its credentials.
 
+Synchronization runs up to three accounts concurrently, with Inbox first and newer missing messages requested first. Full messages, including attachments, are downloaded in batches of up to 25 messages with an 8 MB target per batch; a single larger message is handled separately, subject to the existing 100 MB limit. Completed batches appear while synchronization continues and remain saved if it is canceled. Operations on the same account are serialized, and IDLE notifications refresh the account that changed, coalescing notifications received during an active sync.
+
+Servers supporting CONDSTORE use saved per-folder modification sequences to fetch changed flags. UID membership is still checked on each refresh to retain remotely removed mail in Local archive; servers without persistent modification sequences, or rejecting the extension, use full flag reconciliation. Widening the recent range still downloads older missing mail. Flag and location updates use separate SQLite metadata rows without rewriting bodies or rebuilding the search index. Existing databases are upgraded automatically on open, and backups include the current merged message state.
+
 Scheduled sends, rules, snooze, reminders, and IDLE monitoring operate while Bentomail is running. Enable tray operation to keep it running after closing the main window. A queued message can be canceled by opening **Outbox → Edit draft** before delivery begins.
 
 If SMTP disconnects after message DATA, or the app closes during delivery, the draft becomes **uncertain**. It is never automatically retried. Inspect your server Sent folder and recipient state before explicitly editing/retrying it. Exact-once delivery cannot be guaranteed by SMTP.
