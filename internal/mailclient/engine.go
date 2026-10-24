@@ -11,8 +11,10 @@ import (
 )
 
 type Engine struct {
-	store *Store
-	mu    sync.Mutex
+	store        *Store
+	mu           sync.Mutex
+	sendMu       sync.Mutex
+	accountLocks map[string]chan struct{}
 }
 
 func NewEngine(s *Store) *Engine { return &Engine{store: s} }
@@ -90,8 +92,8 @@ func (e *Engine) TestAccount(ctx context.Context, a Account, password string) er
 	return nil
 }
 func (e *Engine) Send(ctx context.Context, request Draft) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.sendMu.Lock()
+	defer e.sendMu.Unlock()
 	var d Draft
 	found := false
 	for _, saved := range e.store.Snapshot().Drafts {
@@ -104,6 +106,11 @@ func (e *Engine) Send(ctx context.Context, request Draft) error {
 	if !found {
 		return errors.New("draft no longer exists")
 	}
+	release, err := e.lockAccount(ctx, d.AccountID)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if d.Status == "sent" || d.Status == "sending" || d.Status == "uncertain" {
 		return errors.New("message was already sent or delivery is uncertain; review it before creating another send")
 	}
@@ -215,207 +222,15 @@ type SyncProgress struct {
 	MessagesDone, MessagesTotal       int
 }
 
-// SyncWithProgress invokes report synchronously on the calling worker. It must
-// not call back into Engine; UI callers should dispatch the value to their UI.
-func (e *Engine) SyncWithProgress(ctx context.Context, accountID string, report func(SyncProgress)) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	var accounts []Account
-	for _, a := range e.store.Snapshot().Accounts {
-		if a.Enabled && (accountID == "" || accountID == a.ID) {
-			accounts = append(accounts, a)
-		}
-	}
-	var errs []error
-	for i, a := range accounts {
-		if err := ctx.Err(); err != nil {
-			return errors.Join(append(errs, err)...)
-		}
-		progress := SyncProgress{AccountID: a.ID, Account: a.Email, AccountIndex: i + 1, AccountsTotal: len(accounts)}
-		actx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-		err := e.syncAccount(actx, a, &progress, report)
-		cancel()
-		if err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", a.Email, err))
-		}
-	}
-	return errors.Join(errs...)
-}
-func (e *Engine) syncAccount(ctx context.Context, a Account, progress *SyncProgress, report func(SyncProgress)) error {
-	publish := func(stage string) {
-		progress.Stage = stage
-		if report != nil {
-			report(*progress)
-		}
-	}
-	publish("Connecting")
-	c, err := e.connect(ctx, a)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	publish("Listing folders")
-	folders, err := c.ListFolders(ctx)
-	if err != nil {
-		return err
-	}
-	if len(folders) == 0 {
-		folders = []string{"INBOX"}
-	}
-	if err = e.store.SetFolderList(a.ID, folders); err != nil {
-		return err
-	}
-	progress.FoldersTotal = len(folders)
-	publish("Applying queued changes")
-	pendingErr := e.processMutations(ctx, c, a.ID)
-	var errs []error
-	if pendingErr != nil {
-		errs = append(errs, pendingErr)
-	}
-	for folderIndex, folder := range folders {
-		if err = ctx.Err(); err != nil {
-			return err
-		}
-		progress.Folder, progress.FolderIndex = folder, folderIndex+1
-		progress.MessagesDone, progress.MessagesTotal = 0, 0
-		publish("Checking messages")
-		validity, count, err := c.SelectFolder(ctx, folder)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", folder, err))
-			continue
-		}
-		snapshot := e.store.Snapshot()
-		old := snapshot.UIDValidity[a.ID][folder]
-		if old != 0 && old != validity {
-			for _, m := range snapshot.Messages {
-				if m.AccountID == a.ID && m.Folder == folder && m.UID > 0 {
-					m.UID = 0
-					if err = e.store.SaveMessage(m); err != nil {
-						return err
-					}
-				}
-			}
-		}
-		if err = e.store.setUIDValidity(a.ID, folder, validity); err != nil {
-			return err
-		}
-		snapshot = e.store.Snapshot()
-		var infos []imapMessageInfo
-		if count > 0 {
-			infos, err = c.FetchUIDAndFlags(ctx)
-			if err != nil {
-				errs = append(errs, err)
-				continue
-			}
-		}
-		local := map[uint32]Message{}
-		for _, m := range snapshot.Messages {
-			if m.AccountID == a.ID && m.Folder == folder && m.UID > 0 {
-				local[m.UID] = m
-			}
-		}
-		pending := map[string]bool{}
-		pendingUID := map[uint32]bool{}
-		var recent map[uint32]bool
-		if !snapshot.Preferences.FullSync && snapshot.Preferences.RecentDays > 0 {
-			recent, err = c.recentUIDs(time.Now().AddDate(0, 0, -snapshot.Preferences.RecentDays))
-			if err != nil {
-				errs = append(errs, err)
-				continue
-			}
-		}
-		for _, p := range e.store.GetPendingMutations() {
-			pending[p.MessageID] = true
-			if p.AccountID == a.ID && p.Type == "update" && p.OldFolder == folder {
-				pendingUID[p.UID] = true
-			}
-		}
-		progress.MessagesTotal = len(infos)
-		remote := map[uint32]bool{}
-		for i, info := range infos {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			progress.MessagesDone = i
-			publish("Synchronizing messages")
-			remote[info.UID] = true
-			if pendingUID[info.UID] {
-				continue
-			}
-			if m, ok := local[info.UID]; ok {
-				if pending[m.ID] {
-					continue
-				}
-				if m.Read != info.Read || m.Starred != info.Star {
-					m.Read = info.Read
-					m.Starred = info.Star
-					if err = e.store.SaveMessage(m); err != nil {
-						return err
-					}
-				}
-				continue
-			}
-			if recent != nil && !recent[info.UID] {
-				continue
-			}
-			raw, err := c.FetchRFC822(ctx, info.UID)
-			if err != nil {
-				errs = append(errs, err)
-				continue
-			}
-			m, err := ParseMessage(raw)
-			if err != nil {
-				errs = append(errs, err)
-				continue
-			}
-			m.AccountID = a.ID
-			m.Folder = folder
-			m.UID = info.UID
-			m.Read = info.Read
-			m.Starred = info.Star
-			// Reuse retained messages after UIDVALIDITY reset and locally saved Sent copies.
-			for _, known := range snapshot.Messages {
-				if known.AccountID == a.ID && known.MessageID != "" && known.MessageID == m.MessageID && strings.EqualFold(known.Folder, folder) && known.UID == 0 {
-					m.ID = known.ID
-					m.Tags = known.Tags
-					m.Category = known.Category
-					m.FollowUp = known.FollowUp
-					m.SnoozedUntil = known.SnoozedUntil
-					break
-				}
-			}
-			originalFolder := m.Folder
-			m = e.store.ApplyRules(m)
-			if err = e.store.SaveMessage(m); err != nil {
-				return err
-			}
-			if m.Folder != originalFolder {
-				if err = e.queueUpdate(m, originalFolder); err != nil {
-					return err
-				}
-			}
-		}
-		progress.MessagesDone = len(infos)
-		publish("Updating local archive")
-		for uid, m := range local {
-			if !remote[uid] && !pending[m.ID] {
-				m.Folder = "Local archive"
-				m.UID = 0
-				if err = e.store.SaveMessage(m); err != nil {
-					return err
-				}
-			}
-		}
-	}
-	publish("Finishing account")
-	return errors.Join(errs...)
-}
 func (e *Engine) queueUpdate(m Message, oldFolder string) error {
 	return e.store.queueMessageUpdate(m, oldFolder)
 }
 func (e *Engine) UpdateMessage(ctx context.Context, m Message, oldFolder string) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	release, err := e.lockAccount(ctx, m.AccountID)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if m.UID == 0 {
 		pending := false
 		for _, p := range e.store.GetPendingMutations() {
@@ -445,8 +260,11 @@ func (e *Engine) UpdateMessage(ctx context.Context, m Message, oldFolder string)
 	return e.processMutations(ctx, c, a.ID)
 }
 func (e *Engine) CreateFolder(ctx context.Context, accountID, name string) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	release, err := e.lockAccount(ctx, accountID)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if strings.TrimSpace(name) == "" || strings.ContainsAny(name, "\r\n\x00") {
 		return errors.New("invalid folder name")
 	}

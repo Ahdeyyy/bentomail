@@ -34,7 +34,7 @@ func (a *app) refreshWatchers() {
 		go e.WatchInbox(ctx, id, func() {
 			dispatch(func() {
 				if !a.closed {
-					a.syncMail()
+					a.syncMailFor(id)
 				}
 			})
 		})

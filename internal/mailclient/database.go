@@ -19,11 +19,13 @@ func (s *Store) openDatabase() error {
 	db.SetMaxOpenConns(1)
 	s.db = db
 	s.dirtyMessages = map[string]bool{}
+	s.dirtyMetadata = map[string]bool{}
 	s.dirtyDrafts = map[string]bool{}
 	fail := func(err error) error { db.Close(); return err }
 	if _, err = db.Exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;
  CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY,value BLOB NOT NULL);
  CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY,payload BLOB NOT NULL);
+ CREATE TABLE IF NOT EXISTS message_state(id TEXT PRIMARY KEY,folder TEXT NOT NULL,uid INTEGER NOT NULL,read INTEGER NOT NULL,starred INTEGER NOT NULL);
  CREATE TABLE IF NOT EXISTS drafts(id TEXT PRIMARY KEY,payload BLOB NOT NULL);
  CREATE VIRTUAL TABLE IF NOT EXISTS message_search USING fts5(id UNINDEXED,body,tokenize='trigram');`); err != nil {
 		return fail(err)
@@ -69,12 +71,14 @@ func (s *Store) openDatabase() error {
 	if state.UIDValidity == nil {
 		state.UIDValidity = map[string]map[string]uint32{}
 	}
-	rows, err := db.Query(`SELECT payload FROM messages ORDER BY rowid`)
+	rows, err := db.Query(`SELECT m.payload,s.folder,s.uid,s.read,s.starred FROM messages m LEFT JOIN message_state s ON s.id=m.id ORDER BY m.rowid`)
 	if err != nil {
 		return fail(err)
 	}
 	for rows.Next() {
-		if err = rows.Scan(&data); err != nil {
+		var folder sql.NullString
+		var uid, read, starred sql.NullInt64
+		if err = rows.Scan(&data, &folder, &uid, &read, &starred); err != nil {
 			rows.Close()
 			return fail(err)
 		}
@@ -82,6 +86,9 @@ func (s *Store) openDatabase() error {
 		if err = json.Unmarshal(data, &m); err != nil {
 			rows.Close()
 			return fail(err)
+		}
+		if folder.Valid {
+			m.Folder, m.UID, m.Read, m.Starred = folder.String, uint32(uid.Int64), read.Int64 != 0, starred.Int64 != 0
 		}
 		state.Messages = append(state.Messages, m)
 	}
@@ -139,13 +146,19 @@ func (s *Store) persistDatabaseLocked() error {
 	if _, err = tx.Exec(`INSERT INTO metadata(key,value)VALUES('mutations',?) ON CONFLICT(key)DO UPDATE SET value=excluded.value`, mutationData); err != nil {
 		return err
 	}
-	for id := range s.dirtyMessages {
-		var found *Message
+	changed := make(map[string]*Message, len(s.dirtyMessages)+len(s.dirtyMetadata))
+	if len(s.dirtyMessages)+len(s.dirtyMetadata) > 0 {
 		for i := range s.state.Messages {
-			if s.state.Messages[i].ID == id {
-				found = &s.state.Messages[i]
-				break
+			m := &s.state.Messages[i]
+			if s.dirtyMessages[m.ID] || s.dirtyMetadata[m.ID] {
+				changed[m.ID] = m
 			}
+		}
+	}
+	for id := range s.dirtyMessages {
+		found := changed[id]
+		if _, err = tx.Exec(`DELETE FROM message_state WHERE id=?`, id); err != nil {
+			return err
 		}
 		if _, err = tx.Exec(`DELETE FROM message_search WHERE id=?`, id); err != nil {
 			return err
@@ -168,6 +181,15 @@ func (s *Store) persistDatabaseLocked() error {
 			body += " " + at.Name
 		}
 		if _, err = tx.Exec(`INSERT INTO message_search(id,body)VALUES(?,?)`, id, body); err != nil {
+			return err
+		}
+	}
+	for id := range s.dirtyMetadata {
+		m := changed[id]
+		if s.dirtyMessages[id] || m == nil {
+			continue
+		}
+		if _, err = tx.Exec(`INSERT INTO message_state(id,folder,uid,read,starred)VALUES(?,?,?,?,?) ON CONFLICT(id)DO UPDATE SET folder=excluded.folder,uid=excluded.uid,read=excluded.read,starred=excluded.starred`, id, m.Folder, m.UID, m.Read, m.Starred); err != nil {
 			return err
 		}
 	}
@@ -197,6 +219,7 @@ func (s *Store) persistDatabaseLocked() error {
 		return err
 	}
 	clear(s.dirtyMessages)
+	clear(s.dirtyMetadata)
 	clear(s.dirtyDrafts)
 	return nil
 }

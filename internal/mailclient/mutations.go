@@ -21,6 +21,13 @@ func (s *Store) queueMessageUpdate(m Message, oldFolder string) error {
 		s.state.Messages = append(s.state.Messages, m)
 	}
 	s.dirtyMessages[m.ID] = true
+	if err := s.enqueueMessageUpdateLocked(m, oldFolder); err != nil {
+		return err
+	}
+	return s.persistStateLocked()
+}
+
+func (s *Store) enqueueMessageUpdateLocked(m Message, oldFolder string) error {
 	compact := Message{ID: m.ID, AccountID: m.AccountID, Folder: m.Folder, Read: m.Read, Starred: m.Starred, Tags: m.Tags}
 	data, err := json.Marshal(compact)
 	if err != nil {
@@ -34,9 +41,9 @@ func (s *Store) queueMessageUpdate(m Message, oldFolder string) error {
 			mutation.OldFolder = old.OldFolder
 			mutation.CreatedAt = old.CreatedAt
 			s.mutations[i] = mutation
-			return s.persistStateLocked()
+			return nil
 		}
 	}
 	s.mutations = append(s.mutations, mutation)
-	return s.persistStateLocked()
+	return nil
 }

@@ -41,6 +41,7 @@ type Store struct {
 	oauthMu       sync.Mutex
 	db            *sql.DB
 	dirtyMessages map[string]bool
+	dirtyMetadata map[string]bool
 	dirtyDrafts   map[string]bool
 	dir           string
 	mu            sync.RWMutex
@@ -178,12 +179,7 @@ func (s *Store) Snapshot() State {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	// Deep copy via JSON serialization
-	b, _ := json.Marshal(s.state)
-	var copyState State
-	_ = json.Unmarshal(b, &copyState)
-
-	return copyState
+	return cloneState(s.state)
 }
 
 // SaveAccount adds or updates an account and securely saves credentials.
@@ -587,8 +583,11 @@ func (s *Store) ImportEML(accountID string, raw []byte) error {
 // ApplyRules executes configured rules on a message.
 func (s *Store) ApplyRules(m Message) Message {
 	s.mu.RLock()
-	rules := s.state.Rules
-	s.mu.RUnlock()
+	defer s.mu.RUnlock()
+	return applyRules(m, s.state.Rules)
+}
+
+func applyRules(m Message, rules []Rule) Message {
 
 	for _, r := range rules {
 		if !r.Enabled || strings.TrimSpace(r.Contains) == "" {

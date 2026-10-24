@@ -583,6 +583,9 @@ func mailDate(t time.Time) string {
 	if t.Format("2006-01-02") == now.Format("2006-01-02") {
 		return t.Format("15:04")
 	}
+	if t.Year() != now.Year() {
+		return t.Format("02 Jan 2006")
+	}
 	return t.Format("02 Jan")
 }
 func (a *app) reader(c *ui.Context) {

@@ -176,6 +176,7 @@ type State struct {
 	TagColors     map[string]string
 	Version       int
 	UIDValidity   map[string]map[string]uint32
+	SyncModSeq    map[string]map[string]uint64
 	Accounts      []Account
 	Messages      []Message
 	Drafts        []Draft

@@ -39,6 +39,7 @@ type app struct {
 	syncCancel                                                              context.CancelFunc
 	syncProgress                                                            mailclient.SyncProgress
 	syncRun                                                                 uint64
+	syncPending                                                             map[string]bool
 	watchers                                                                map[string]context.CancelFunc
 	watchConfig                                                             map[string]string
 	lastSync, timeSaved                                                     time.Time
@@ -243,7 +244,16 @@ func (a *app) tick() {
 	}
 }
 func (a *app) syncMail() {
-	if a.syncing || len(a.state.Accounts) == 0 {
+	a.syncMailFor(a.accountID)
+}
+
+func (a *app) syncMailFor(accountID string) {
+	if a.closed || len(a.state.Accounts) == 0 {
+		return
+	}
+	if a.syncing {
+		if a.syncPending == nil { a.syncPending = map[string]bool{} }
+		a.syncPending[accountID] = true
 		return
 	}
 	a.syncing = true
@@ -253,7 +263,7 @@ func (a *app) syncMail() {
 	a.lastSync = time.Now()
 	ctx, cancel := context.WithCancel(a.ctx)
 	a.syncCancel = cancel
-	e, id := a.engine, a.accountID
+	e, id, s := a.engine, accountID, a.store
 	before := map[string]bool{}
 	for _, m := range a.state.Messages {
 		before[m.ID] = true
@@ -263,11 +273,19 @@ func (a *app) syncMail() {
 	// always publishing new stages, folders and the final count of each folder.
 	var previous mailclient.SyncProgress
 	var reportedAt time.Time
+	var refreshedAt time.Time
 	report := func(p mailclient.SyncProgress) {
 		if dispatch == nil {
 			return
 		}
 		now := time.Now()
+		// Snapshot off the UI thread after committed batches, at most twice per
+		// second. Inbox mail becomes readable while other folders/accounts run.
+		if (p.Stage == "Saving downloaded mail" || p.Stage == "Updating local archive") && now.Sub(refreshedAt) >= 500*time.Millisecond {
+			state := s.Snapshot()
+			refreshedAt = now
+			dispatch(func() { a.receiveSyncState(run, state) })
+		}
 		if p.AccountID == previous.AccountID && p.Folder == previous.Folder && p.Stage == previous.Stage && p.MessagesDone != p.MessagesTotal && now.Sub(reportedAt) < 100*time.Millisecond {
 			return
 		}
@@ -286,8 +304,10 @@ func (a *app) syncMail() {
 		cancel()
 		a.syncCancel = nil
 		if errors.Is(err, context.Canceled) {
+			a.syncPending = nil
 			a.notice("Synchronization canceled", false)
 		}
+		defer a.syncNextPending()
 		if err != nil {
 			return
 		}
@@ -310,6 +330,27 @@ func (a *app) syncMail() {
 		a.syncCancel = nil
 		cancel()
 	}
+}
+
+func (a *app) receiveSyncState(run uint64, state mailclient.State) {
+	if a.closed || !a.syncing || a.syncRun != run || state.Revision < a.state.Revision { return }
+	a.state = state
+	a.updatePreview()
+	a.updateBadge()
+}
+
+func (a *app) syncNextPending() {
+	if a.closed || len(a.syncPending) == 0 { return }
+	if a.syncPending[""] {
+		a.syncPending = nil
+		a.syncMailFor("")
+		return
+	}
+	ids := make([]string, 0, len(a.syncPending))
+	for id := range a.syncPending { ids = append(ids, id) }
+	slices.Sort(ids)
+	delete(a.syncPending, ids[0])
+	a.syncMailFor(ids[0])
 }
 
 func (a *app) receiveSyncProgress(run uint64, progress mailclient.SyncProgress) {
