@@ -202,15 +202,38 @@ func specialFolder(folders []string, kind string) string {
 	return kind
 }
 func (e *Engine) Sync(ctx context.Context, accountID string) error {
+	return e.SyncWithProgress(ctx, accountID, nil)
+}
+
+// SyncProgress describes work within the current account and folder. Message
+// counts include cached messages whose flags are checked, not just downloads.
+// Totals are local to the folder; other accounts have not been queried yet.
+type SyncProgress struct {
+	AccountID, Account, Folder, Stage string
+	AccountIndex, AccountsTotal       int
+	FolderIndex, FoldersTotal         int
+	MessagesDone, MessagesTotal       int
+}
+
+// SyncWithProgress invokes report synchronously on the calling worker. It must
+// not call back into Engine; UI callers should dispatch the value to their UI.
+func (e *Engine) SyncWithProgress(ctx context.Context, accountID string, report func(SyncProgress)) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	var errs []error
+	var accounts []Account
 	for _, a := range e.store.Snapshot().Accounts {
-		if !a.Enabled || (accountID != "" && accountID != a.ID) {
-			continue
+		if a.Enabled && (accountID == "" || accountID == a.ID) {
+			accounts = append(accounts, a)
 		}
+	}
+	var errs []error
+	for i, a := range accounts {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(append(errs, err)...)
+		}
+		progress := SyncProgress{AccountID: a.ID, Account: a.Email, AccountIndex: i + 1, AccountsTotal: len(accounts)}
 		actx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-		err := e.syncAccount(actx, a)
+		err := e.syncAccount(actx, a, &progress, report)
 		cancel()
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", a.Email, err))
@@ -218,12 +241,20 @@ func (e *Engine) Sync(ctx context.Context, accountID string) error {
 	}
 	return errors.Join(errs...)
 }
-func (e *Engine) syncAccount(ctx context.Context, a Account) error {
+func (e *Engine) syncAccount(ctx context.Context, a Account, progress *SyncProgress, report func(SyncProgress)) error {
+	publish := func(stage string) {
+		progress.Stage = stage
+		if report != nil {
+			report(*progress)
+		}
+	}
+	publish("Connecting")
 	c, err := e.connect(ctx, a)
 	if err != nil {
 		return err
 	}
 	defer c.Close()
+	publish("Listing folders")
 	folders, err := c.ListFolders(ctx)
 	if err != nil {
 		return err
@@ -234,15 +265,20 @@ func (e *Engine) syncAccount(ctx context.Context, a Account) error {
 	if err = e.store.SetFolderList(a.ID, folders); err != nil {
 		return err
 	}
+	progress.FoldersTotal = len(folders)
+	publish("Applying queued changes")
 	pendingErr := e.processMutations(ctx, c, a.ID)
 	var errs []error
 	if pendingErr != nil {
 		errs = append(errs, pendingErr)
 	}
-	for _, folder := range folders {
+	for folderIndex, folder := range folders {
 		if err = ctx.Err(); err != nil {
 			return err
 		}
+		progress.Folder, progress.FolderIndex = folder, folderIndex+1
+		progress.MessagesDone, progress.MessagesTotal = 0, 0
+		publish("Checking messages")
 		validity, count, err := c.SelectFolder(ctx, folder)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", folder, err))
@@ -294,8 +330,14 @@ func (e *Engine) syncAccount(ctx context.Context, a Account) error {
 				pendingUID[p.UID] = true
 			}
 		}
+		progress.MessagesTotal = len(infos)
 		remote := map[uint32]bool{}
-		for _, info := range infos {
+		for i, info := range infos {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			progress.MessagesDone = i
+			publish("Synchronizing messages")
 			remote[info.UID] = true
 			if pendingUID[info.UID] {
 				continue
@@ -353,6 +395,8 @@ func (e *Engine) syncAccount(ctx context.Context, a Account) error {
 				}
 			}
 		}
+		progress.MessagesDone = len(infos)
+		publish("Updating local archive")
 		for uid, m := range local {
 			if !remote[uid] && !pending[m.ID] {
 				m.Folder = "Local archive"
@@ -363,6 +407,7 @@ func (e *Engine) syncAccount(ctx context.Context, a Account) error {
 			}
 		}
 	}
+	publish("Finishing account")
 	return errors.Join(errs...)
 }
 func (e *Engine) queueUpdate(m Message, oldFolder string) error {

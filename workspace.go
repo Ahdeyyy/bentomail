@@ -28,7 +28,8 @@ func (a *app) view(c *ui.Context) {
 	a.animateSidebar(root)
 	root.Children(func() {
 		a.topbar(c)
-		ui.Row(c).Grow(1).FillWidth().MinHeight(0).Padding(8, 0, 0, 0).Children(func() {
+		a.syncProgressView(c)
+		ui.Row(c.Key("workspace")).Grow(1).FillWidth().MinHeight(0).Padding(8, 0, 0, 0).Children(func() {
 			content := func() {
 				ui.Column(c).Fill().Children(func() {
 					if a.statusError {
@@ -53,6 +54,52 @@ func (a *app) view(c *ui.Context) {
 	a.mailContextMenu(c)
 	a.confirmationDialog(c)
 }
+
+// Keep progress outside the sidebar so it stays visible on every page and
+// when navigation is collapsed. Percentages describe the current folder.
+func (a *app) syncProgressView(c *ui.Context) {
+	if !a.syncing {
+		return
+	}
+	p, t := a.syncProgress, a.theme
+	stage := p.Stage
+	if stage == "" {
+		stage = "Waiting to synchronize"
+	}
+	detail := p.Account
+	if p.AccountsTotal > 1 {
+		detail = fmt.Sprintf("%s · Account %d of %d", detail, p.AccountIndex, p.AccountsTotal)
+	}
+	if p.Folder != "" {
+		detail += fmt.Sprintf(" · %s · Folder %d of %d", p.Folder, p.FolderIndex, p.FoldersTotal)
+	}
+	value := float64(-1)
+	count := ""
+	if p.MessagesTotal > 0 {
+		value = float64(p.MessagesDone) / float64(p.MessagesTotal)
+		count = fmt.Sprintf("%d of %d messages checked · %.0f%%", p.MessagesDone, p.MessagesTotal, value*100)
+	}
+	ui.Column(c.Key("sync-progress")).Label("Synchronization progress").FillWidth().Shrink(0).Padding(8, 20, 10, 20).Gap(5).Background(t.Surface).Children(func() {
+		ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+			ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
+				ui.Text(c, stage).FontSize(11).Bold().MaxLines(1)
+				if detail != "" {
+					ui.Text(c, detail).FontSize(10).TextColor(t.TextMuted).MaxLines(1).Tooltip(detail)
+				}
+			})
+			if count != "" {
+				ui.Text(c, count).FontSize(10).TextColor(t.TextMuted).Shrink(0)
+			}
+			textButton(c, "Cancel sync").OnClick(func() {
+				if a.syncCancel != nil {
+					a.syncCancel()
+				}
+			})
+		})
+		ui.Progress(c, value).Label("Current folder synchronization progress").FillWidth().Height(4)
+	})
+}
+
 func (a *app) sidebar(c *ui.Context) {
 	t := a.theme
 	collapsed := a.prefs.SidebarCollapsed

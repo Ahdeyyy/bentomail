@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/mail"
 	"slices"
@@ -36,6 +37,8 @@ type app struct {
 	busy                                                                    int
 	syncing                                                                 bool
 	syncCancel                                                              context.CancelFunc
+	syncProgress                                                            mailclient.SyncProgress
+	syncRun                                                                 uint64
 	watchers                                                                map[string]context.CancelFunc
 	watchConfig                                                             map[string]string
 	lastSync, timeSaved                                                     time.Time
@@ -162,10 +165,9 @@ func (a *app) startWorker(ctx context.Context) {
 	go worker(a.jobs)
 	go worker(a.networkJobs)
 }
-func (a *app) network(label string, fn func() error, done ...func(error)) {
+func (a *app) network(label string, fn func() error, done ...func(error)) bool {
 	if a.networkJobs == nil {
-		a.run(label, fn, done...)
-		return
+		return a.run(label, fn, done...)
 	}
 	var cb func(error)
 	if len(done) > 0 {
@@ -176,11 +178,13 @@ func (a *app) network(label string, fn func() error, done ...func(error)) {
 		a.busy++
 		a.status = label + "…"
 		a.statusError = false
+		return true
 	default:
 		a.notice("A network operation is already queued. Try again shortly.", true)
+		return false
 	}
 }
-func (a *app) run(label string, fn func() error, done ...func(error)) {
+func (a *app) run(label string, fn func() error, done ...func(error)) bool {
 	var cb func(error)
 	if len(done) > 0 {
 		cb = done[0]
@@ -196,15 +200,17 @@ func (a *app) run(label string, fn func() error, done ...func(error)) {
 		if cb != nil {
 			cb(err)
 		}
-		return
+		return true
 	}
 	select {
 	case a.jobs <- work{label, fn, cb}:
 		a.busy++
 		a.status = label + "…"
 		a.statusError = false
+		return true
 	default:
 		a.notice("Another operation is still running; try again shortly.", true)
+		return false
 	}
 }
 func (a *app) notice(s string, bad bool) { a.status = s; a.statusError = bad }
@@ -241,6 +247,9 @@ func (a *app) syncMail() {
 		return
 	}
 	a.syncing = true
+	a.syncRun++
+	run := a.syncRun
+	a.syncProgress = mailclient.SyncProgress{Stage: "Waiting to synchronize"}
 	a.lastSync = time.Now()
 	ctx, cancel := context.WithCancel(a.ctx)
 	a.syncCancel = cancel
@@ -249,10 +258,36 @@ func (a *app) syncMail() {
 	for _, m := range a.state.Messages {
 		before[m.ID] = true
 	}
-	a.network("Mail synchronized", func() error { return e.Sync(ctx, id) }, func(err error) {
+	dispatch := a.dispatch
+	// Counts can advance rapidly for cached messages. Limit UI dispatches while
+	// always publishing new stages, folders and the final count of each folder.
+	var previous mailclient.SyncProgress
+	var reportedAt time.Time
+	report := func(p mailclient.SyncProgress) {
+		if dispatch == nil {
+			return
+		}
+		now := time.Now()
+		if p.AccountID == previous.AccountID && p.Folder == previous.Folder && p.Stage == previous.Stage && p.MessagesDone != p.MessagesTotal && now.Sub(reportedAt) < 100*time.Millisecond {
+			return
+		}
+		previous, reportedAt = p, now
+		dispatch(func() { a.receiveSyncProgress(run, p) })
+	}
+	if !a.network("Mail synchronized", func() error {
+		err := e.SyncWithProgress(ctx, id, report)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return err
+	}, func(err error) {
 		a.syncing = false
+		a.syncProgress = mailclient.SyncProgress{}
 		cancel()
 		a.syncCancel = nil
+		if errors.Is(err, context.Canceled) {
+			a.notice("Synchronization canceled", false)
+		}
 		if err != nil {
 			return
 		}
@@ -269,7 +304,18 @@ func (a *app) syncMail() {
 			}
 			a.notify("New mail", body)
 		}
-	})
+	}) {
+		a.syncing = false
+		a.syncProgress = mailclient.SyncProgress{}
+		a.syncCancel = nil
+		cancel()
+	}
+}
+
+func (a *app) receiveSyncProgress(run uint64, progress mailclient.SyncProgress) {
+	if !a.closed && a.syncing && a.syncRun == run {
+		a.syncProgress = progress
+	}
 }
 func (a *app) notify(title, body string) {
 	if a.window == nil || !a.prefs.Notify || quietNow(a.prefs.QuietStart, a.prefs.QuietEnd, time.Now()) {

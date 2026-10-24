@@ -41,3 +41,49 @@ func TestSuppressSystemCaptionPreservesWindowControls(t *testing.T) {
 		}
 	}
 }
+
+func TestCaptionlessMaximizedWindowStaysInWorkArea(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	class := syscall.StringToUTF16Ptr("STATIC")
+	// A hidden maximized window exercises native positioning without stealing
+	// focus or changing the user's desktop during the regression test.
+	hwnd, _, err := captionUser.NewProc("CreateWindowExW").Call(0, uintptr(unsafe.Pointer(class)), 0, 0x01cf0000, 0, 0, 400, 240, 0, 0, 0, 0)
+	if hwnd == 0 {
+		t.Fatal(err)
+	}
+	defer captionUser.NewProc("DestroyWindow").Call(hwnd)
+	if zoomed, _, _ := captionUser.NewProc("IsZoomed").Call(hwnd); zoomed == 0 {
+		t.Fatal("test window is not maximized")
+	}
+	info, ok := captionWorkArea(hwnd)
+	if !ok {
+		t.Fatal("cannot query monitor work area")
+	}
+	for i := 0; i < 3; i++ {
+		if err := suppressSystemCaption(hwnd); err != nil {
+			t.Fatal(err)
+		}
+		var limits captionMinMaxInfo
+		captionUser.NewProc("SendMessageW").Call(hwnd, 0x0024, 0, uintptr(unsafe.Pointer(&limits)))
+		wantPosition := captionPoint{info.Work.Left - info.Monitor.Left, info.Work.Top - info.Monitor.Top}
+		wantSize := captionPoint{info.Work.Right - info.Work.Left, info.Work.Bottom - info.Work.Top}
+		if limits.MaxPosition != wantPosition || limits.MaxSize != wantSize {
+			t.Fatalf("maximize covers taskbar: position=%+v size=%+v; want %+v %+v", limits.MaxPosition, limits.MaxSize, wantPosition, wantSize)
+		}
+		// Simulate a later DPI/material/frame refresh proposing monitor bounds.
+		monitor := info.Monitor
+		if ok, _, err := captionUser.NewProc("SetWindowPos").Call(hwnd, 0, uintptr(monitor.Left), uintptr(monitor.Top), uintptr(monitor.Right-monitor.Left), uintptr(monitor.Bottom-monitor.Top), 0x34); ok == 0 {
+			t.Fatal(err)
+		}
+		var bounds captionRect
+		captionUser.NewProc("GetWindowRect").Call(hwnd, uintptr(unsafe.Pointer(&bounds)))
+		if bounds != info.Work {
+			t.Fatalf("frame update covered the taskbar: bounds=%+v work=%+v", bounds, info.Work)
+		}
+		visible, _, _ := captionUser.NewProc("IsWindowVisible").Call(hwnd)
+		if visible != 0 {
+			t.Fatal("frame update unexpectedly showed the hidden window")
+		}
+	}
+}
