@@ -1,11 +1,11 @@
 module bentomail
 
-go 1.27.1
+go 1.27.3
 
 tool github.com/egoist/mygo/cmd/mygo
 
 require (
-	github.com/egoist/mygo v0.5.5
+	github.com/egoist/mygo v0.7.4
 	github.com/emersion/go-imap v1.2.1
 	github.com/emersion/go-message v0.18.2
 	golang.org/x/net v0.59.0

@@ -14,8 +14,8 @@ import (
 	"github.com/egoist/mygo/ui/richtext"
 )
 
-func TestToolbarSharesTitlebarWithNativeControls(t *testing.T) {
-	for _, bar := range []ui.TitleBar{{Height: 36, Right: 138}, {Height: 28, Left: 80}} {
+func TestToolbarWindowControls(t *testing.T) {
+	for _, bar := range []ui.TitleBar{{}, {Height: 36, Right: 138}, {Height: 28, Left: 80}} {
 		for _, collapsed := range []bool{false, true} {
 			t.Run(fmt.Sprintf("left=%g/right=%g/collapsed=%v", bar.Left, bar.Right, collapsed), func(t *testing.T) {
 				a := seededApp(t)
@@ -26,11 +26,16 @@ func TestToolbarSharesTitlebarWithNativeControls(t *testing.T) {
 				if !ok || header.H != max(windowTitlebarHeight, bar.Height) {
 					t.Fatalf("unexpected titlebar: %+v", header)
 				}
-				for _, label := range []string{"Search mail", "Sync mail", "Add account"} {
+				for _, label := range []string{"Search mail", "Sync mail", "Add account", "Minimize window", "Maximize window", "Close window"} {
 					r, ok := tt.Find(label)
 					if !ok || r.Y < header.Y || r.Y+r.H > header.Y+header.H || r.X < bar.Left || r.X+r.W > 1000-bar.Right {
 						t.Fatalf("%s does not fit beside the native controls: %+v", label, r)
 					}
+				}
+				search, _ := tt.Find("Search mail")
+				controls, _ := tt.Find("Window controls")
+				if search.W < 200 || search.X+search.W > controls.X {
+					t.Fatalf("window controls crowd the search field: search=%+v controls=%+v", search, controls)
 				}
 				compose, ok := tt.Find("Compose")
 				if !ok || compose.Y != header.Y+header.H+8 {

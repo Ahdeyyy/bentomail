@@ -360,6 +360,7 @@ func (a *app) topbar(c *ui.Context) {
 			}
 		})
 		iconButton(c, "plus", "Add account", func() { a.resetAccountForm(); a.page = "settings"; a.settingsTab = "Accounts" })
+		windowControls(c, a.window)
 	})
 }
 func title(s string) string {

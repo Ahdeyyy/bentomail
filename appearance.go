@@ -310,10 +310,9 @@ func action(c *ui.Context, name, label string, primary bool, fn func()) ui.Eleme
 const windowTitlebarHeight = 44
 
 // Keep the OS title for task switching and accessibility, while the client
-// draws its toolbar beside the native window controls.
+// draws a single toolbar and its own window controls on every platform.
 func newAppWindow(opts mygo.WindowOptions, theme func() *ui.Theme) *mygo.Window {
-	opts.TitleBarStyle = mygo.TitleBarHidden
-	opts.TitleBarHeight = windowTitlebarHeight
+	opts.Frameless = true
 	// Create with a material even at 0% so the setting can change live on Windows.
 	opts.Vibrancy = mygo.VibrancyAcrylic
 	t := theme()
@@ -323,10 +322,43 @@ func newAppWindow(opts mygo.WindowOptions, theme func() *ui.Theme) *mygo.Window 
 	return w
 }
 
-func windowTitlebar(c *ui.Context) {
-	bar := c.TitleBar()
-	ui.Row(c).Label("Window titlebar").Height(max(windowTitlebarHeight, bar.Height)).Shrink(0).
-		FillWidth().Padding(0, bar.Right, 0, bar.Left).DragWindow()
+func windowTitlebar(c *ui.Context, w *mygo.Window) {
+	ui.Row(c).Label("Window titlebar").Height(windowTitlebarHeight).Shrink(0).
+		FillWidth().Padding(6, 12).AlignItems(ui.Center).DragWindow().Children(func() {
+		ui.Box(c).Grow(1)
+		windowControls(c, w)
+	})
+}
+
+func windowControls(c *ui.Context, w *mygo.Window) {
+	if w != nil && w.IsFullScreen() {
+		return
+	}
+	ui.Row(c).Label("Window controls").Gap(4).Shrink(0).Children(func() {
+		iconButton(c, "minimize", "Minimize window", func() {
+			if w != nil {
+				w.Minimize()
+			}
+		})
+		name, label := "maximize", "Maximize window"
+		if w != nil && w.IsMaximized() {
+			name, label = "restore", "Restore window"
+		}
+		iconButton(c, name, label, func() {
+			if w != nil {
+				if w.IsMaximized() {
+					w.Unmaximize()
+				} else {
+					w.Maximize()
+				}
+			}
+		})
+		iconButton(c, "close", "Close window", func() {
+			if w != nil {
+				w.Close()
+			}
+		})
+	})
 }
 
 var iconCache = map[string]*ui.SVG{}
@@ -360,6 +392,9 @@ func icon(name string) *ui.SVG {
 		"sidebar":    `<rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 3v18"/>`,
 		"grip":       `<path d="M9 5v.01M15 5v.01M9 12v.01M15 12v.01M9 19v.01M15 19v.01"/>`,
 		"close":      `<path d="m6 6 12 12M18 6 6 18"/>`,
+		"minimize":   `<path d="M5 17h14"/>`,
+		"maximize":   `<rect x="5" y="5" width="14" height="14"/>`,
+		"restore":    `<path d="M9 5h10v10M9 5v4h6v6h4"/><rect x="5" y="9" width="10" height="10"/>`,
 		"plus":       `<path d="M12 4v16M4 12h16"/>`,
 		"reply":      `<path d="m9 4-7 7 7 7M2 11h12c5 0 8 4 8 9"/>`,
 		"forward":    `<path d="m15 4 7 7-7 7M22 11H10c-5 0-8 4-8 9"/>`,
