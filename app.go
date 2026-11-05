@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	"bentomail/internal/mailclient"
 	"github.com/egoist/mygo"
@@ -60,6 +61,7 @@ type app struct {
 	selection                                                               ui.Selection[string]
 	searchHandle                                                            ui.Handle
 	mailMenu                                                                mailMenuState
+	recipientsOpen                                                          string // Message whose long recipient lists are expanded.
 	mailMenuTrigger                                                         ui.Handle
 	focus                                                                   string
 	preview                                                                 ui.NativeWebView
@@ -632,17 +634,52 @@ func sender(from string) (string, string) {
 	}
 	return from, from
 }
+
+// initials takes the first letter of the first and last words that start
+// with one, so "Support Team (Stripe)" is "ST", a flag or emoji prefix is
+// skipped, and generational suffixes ("III", "Jr.") are not the surname.
 func initials(s string) string {
-	words := strings.Fields(s)
-	if len(words) == 0 {
+	var letters []rune
+	for _, word := range strings.Fields(s) {
+		r := []rune(word)
+		if !unicode.IsLetter(r[0]) {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSuffix(word, ".")) {
+		case "jr", "sr", "ii", "iii", "iv":
+			if len(letters) > 0 {
+				continue
+			}
+		}
+		letters = append(letters, r[0])
+	}
+	if len(letters) == 0 {
 		return "?"
 	}
-	r := []rune(words[0])
-	v := string(r[0])
-	if len(words) > 1 {
-		v += string([]rune(words[len(words)-1])[0])
+	v := string(letters[0])
+	if len(letters) > 1 {
+		v += string(letters[len(letters)-1])
 	}
 	return strings.ToUpper(v)
+}
+
+// countLabel groups digits and pluralizes: "1 conversation", "1,293 conversations".
+func countLabel(n int, noun string) string {
+	if n != 1 {
+		noun += "s"
+	}
+	return groupDigits(n) + " " + noun
+}
+
+func groupDigits(n int) string {
+	if n < 0 {
+		return "-" + groupDigits(-n)
+	}
+	s := fmt.Sprint(n)
+	for i := len(s) - 3; i > 0; i -= 3 {
+		s = s[:i] + "," + s[i:]
+	}
+	return s
 }
 func (a *app) savePrefs() {
 	a.prefs.Translucency = normalizedTranslucency(a.prefs.Translucency)

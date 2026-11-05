@@ -70,7 +70,7 @@ func (a *app) animateSidebar(root ui.Element) {
 	if a.prefs.SidebarCollapsed {
 		target = 0
 	}
-	progress := root.Animate("sidebar-expanded", target, a.animationDuration(sidebarDuration))
+	progress := root.AnimateWith("sidebar-expanded", target, a.animationDuration(sidebarDuration), easeDrawer)
 	s := &a.sidebarMotion
 	s.width = 80 + (a.prefs.SidebarWidth-80)*progress
 	s.rendered = s.width
@@ -87,7 +87,7 @@ func (a *app) workspaceSplit(c *ui.Context, content func()) {
 func (a *app) mailScreenTransition(x float32) ui.ElementTransition {
 	// Keep the screen opaque so the matched avatar remains visible throughout
 	// its flight. The framework handles reduced motion for both transitions.
-	return ui.ElementTransition{Duration: a.animationDuration(mailScreenDuration), Colors: true, Enter: &ui.Motion{X: x, Opacity: 1}}
+	return ui.ElementTransition{Duration: a.animationDuration(mailScreenDuration), Ease: easeOut, Colors: true, Enter: &ui.Motion{X: x, Opacity: 1}}
 }
 
 // Message identity prevents two messages from the same sender matching.
@@ -110,6 +110,7 @@ func (a *app) messageAvatar(c *ui.Context, m mailclient.Message, reading bool) u
 	if a.prefs.Layout == "Hidden" && a.prefs.Density != "Compact" {
 		avatar.Transition(ui.ElementTransition{
 			Duration: a.animationDuration(mailScreenDuration),
+			Ease:     easeOut,
 			// Match handles the screen morph; ordinary layout and scrolling
 			// must follow the row immediately rather than animate position.
 			Colors: true,

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net/mail"
 	"slices"
 	"strings"
 	"time"
@@ -77,9 +78,9 @@ func (a *app) syncProgressView(c *ui.Context) {
 	count := ""
 	if p.MessagesTotal > 0 {
 		value = float64(p.MessagesDone) / float64(p.MessagesTotal)
-		count = fmt.Sprintf("%d of %d messages checked · %.0f%%", p.MessagesDone, p.MessagesTotal, value*100)
+		count = fmt.Sprintf("%s of %s checked · %.0f%%", groupDigits(p.MessagesDone), countLabel(p.MessagesTotal, "message"), value*100)
 	}
-	ui.Column(c.Key("sync-progress")).Label("Synchronization progress").FillWidth().Shrink(0).Padding(8, 20, 10, 20).Gap(5).Background(t.Surface).Children(func() {
+	ui.Column(c.Key("sync-progress")).Label("Synchronization progress").FillWidth().Shrink(0).Padding(8, 20, 10, 20).Gap(5).Children(func() {
 		ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
 			ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
 				ui.Text(c, stage).FontSize(11).Bold().MaxLines(1)
@@ -255,7 +256,7 @@ func (a *app) nav(c *ui.Context, ic, label, id string, count int) {
 		sidebarTooltip(c, b, tip)
 	}
 	if sel {
-		frost(b, surface(t)).TextColor(t.Text).Shadow(0, 2, 5, 0, t.Text.Alpha(.04))
+		b.Background(paneSurface(t)).TextColor(t.Text).Shadow(0, 1, 3, 0, shadowColor(t, .05))
 	} else if b.Hovered() {
 		b.Background(t.SurfaceHover)
 	} else {
@@ -445,7 +446,7 @@ func (a *app) messageList(c *ui.Context) {
 		a.mailHeading(c)
 		ui.Column(c).FillWidth().Gap(9).Padding(12).Children(func() {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
-				ui.Textf(c, "%d conversations", len(ms)).FontSize(11).TextColor(t.TextMuted).Grow(1)
+				ui.Text(c, countLabel(len(ms), "conversation")).FontSize(11).TextColor(t.TextMuted).Grow(1)
 				iconButton(c, "more", "Selected message actions", func() {}).Menu(a.bulkMenu)
 			})
 			ui.Row(c).Gap(5).FillWidth().Children(func() {
@@ -496,7 +497,9 @@ func (a *app) messageList(c *ui.Context) {
 			if selected {
 				text, muted = t.AccentText, t.AccentText
 			}
-			r := ui.Row(rc).FillWidth().Padding(pad, 10).Gap(10).Radius(8).TextColor(text).Transition(controlTransition())
+			// No color transition: the selection follows held arrow keys and
+			// must not trail behind them.
+			r := ui.Row(rc).FillWidth().Padding(pad, 10).Gap(10).Radius(8).TextColor(text)
 			if selected {
 				r.Background(t.Accent)
 			} else if r.Hovered() {
@@ -524,8 +527,9 @@ func (a *app) messageList(c *ui.Context) {
 					if !m.Read {
 						s.Bold()
 					}
-					if !compact && !a.prefs.HideAvatars {
-						ui.Text(rc, strings.Join(strings.Fields(m.Text), " ")).FontSize(10).TextColor(muted).MaxLines(max(1, a.prefs.PreviewLines))
+					// Image-only mail has no text to preview; leave no blank line.
+					if preview := strings.Join(strings.Fields(m.Text), " "); preview != "" && !compact && !a.prefs.HideAvatars {
+						ui.Text(rc, preview).FontSize(10).TextColor(muted).MaxLines(max(1, a.prefs.PreviewLines))
 					}
 					if len(m.Tags) > 0 || len(m.Attachments) > 0 || m.Starred || a.accountID == "" {
 						ui.Row(rc).Gap(4).FillWidth().Wrap().Children(func() {
@@ -580,6 +584,9 @@ func (a *app) messageList(c *ui.Context) {
 	})
 }
 func mailDate(t time.Time) string {
+	if t.IsZero() { // No Date header.
+		return ""
+	}
 	now := time.Now()
 	if t.Format("2006-01-02") == now.Format("2006-01-02") {
 		return t.Format("15:04")
@@ -593,9 +600,16 @@ func (a *app) reader(c *ui.Context) {
 	t := a.theme
 	m, ok := a.selected()
 	var avatarSlot ui.Element
+	// While the screen transition runs, the avatar flies above the pane from
+	// the list row; at rest it sits in the header and scrolls with it.
+	flying := a.prefs.Layout == "Hidden" && !a.avatarMotion.until.IsZero()
 	p := panel(c, ui.Column(c.Key("reader-"+a.selectedID))).Label("Reading pane").MinWidth(minReaderWidth).Fill()
 	if a.prefs.Layout == "Hidden" {
 		p.Transition(a.mailScreenTransition(10))
+	} else {
+		// The pane is keyed by message, and arrow keys step through the list:
+		// swap its content instantly rather than replaying the entrance.
+		p.Transition(controlTransition())
 	}
 	p.Children(func() {
 		if a.prefs.Layout == "Hidden" && ok {
@@ -612,7 +626,12 @@ func (a *app) reader(c *ui.Context) {
 		if !ok {
 			ui.Column(c).Fill().Center().Gap(14).Padding(36).Children(func() {
 				ui.Box(c).Size(72, 72).Center().Children(func() { ui.Icon(c, icon("mail")).Size(40, 40).TextColor(t.TextMuted) })
-				ui.Text(c, "Select a message").FontSize(22).Bold()
+				prompt := "Select a message"
+				if len(a.messages()) == 0 {
+					// The list beside it already says why it's empty.
+					prompt = "Nothing to read here"
+				}
+				ui.Text(c, prompt).FontSize(22).Bold()
 				ui.Row(c).Gap(16).Padding(18, 0).Children(func() {
 					ui.Text(c, "Ctrl N  Compose").FontSize(10).TextColor(t.TextMuted)
 					ui.Text(c, "Ctrl F  Find mail").FontSize(10).TextColor(t.TextMuted)
@@ -642,65 +661,75 @@ func (a *app) reader(c *ui.Context) {
 			ui.Box(c).Grow(1)
 			a.mailMoreButton(c, m)
 		})
-		ui.Column(c).FillWidth().Padding(20, 24, 14, 24).Gap(14).Children(func() {
-			subj := m.Subject
-			if subj == "" {
-				subj = "(No subject)"
-			}
-			ui.Text(c, subj).FontSize(23).Bold().MaxLines(3)
-			name, address := sender(m.From)
-			ui.Row(c).FillWidth().Gap(11).AlignItems(ui.Center).Children(func() {
-				if a.prefs.Layout == "Hidden" {
-					avatarSlot = ui.Box(c.Key("sender-avatar-slot")).Size(38, 38).Shrink(0)
-				} else {
-					a.messageAvatar(c, m, true)
+		// A tall header (long subject, many recipients and tags) must never
+		// squeeze the body to nothing: it scrolls with plain bodies, and is
+		// capped above the native HTML view, which cannot share a scroll.
+		header := func() {
+			ui.Column(c).FillWidth().Padding(20, 24, 14, 24).Gap(14).Children(func() {
+				subj := m.Subject
+				if subj == "" {
+					subj = "(No subject)"
 				}
-				ui.Column(c).Grow(1).Gap(4).Children(func() {
-					ui.Text(c, name).FontSize(12).Bold()
-					ui.Text(c, address).FontSize(10).TextColor(t.TextMuted).Selectable()
-				})
-				ui.Text(c, m.Date.Local().Format("02 Jan 2006 · 15:04")).FontSize(10).TextColor(t.TextMuted)
-			})
-			ui.Text(c, "To: "+m.To).FontSize(10).TextColor(t.TextMuted).Selectable().MaxLines(2)
-			if m.CC != "" {
-				ui.Text(c, "Cc: "+m.CC).FontSize(10).TextColor(t.TextMuted).Selectable()
-			}
-			ui.Row(c).Gap(5).Wrap().Children(func() {
-				if m.Category != "" {
-					ui.Text(c, m.Category).FontSize(10).Padding(4, 7).Radius(4).Background(t.Surface)
-				}
-				for _, tag := range m.Tags {
-					color := a.tagColor(tag)
-					ui.Text(c, tag).FontSize(10).Padding(4, 7).Radius(4).TextColor(color).Background(color.Alpha(.1))
-				}
-				menuButton(c, "+ Tag", func(menu *ui.Menu) {
-					for _, tag := range a.state.Tags {
-						if menu.Item(tag).Chosen() {
-							if slices.Contains(m.Tags, tag) {
-								m.Tags = slices.DeleteFunc(m.Tags, func(v string) bool { return v == tag })
-							} else {
-								m.Tags = append(m.Tags, tag)
-							}
-							a.mutate(m, false)
-						}
+				ui.Text(c, subj).FontSize(23).Bold().MaxLines(3).Tooltip(subj)
+				name, address := sender(m.From)
+				ui.Row(c).FillWidth().Gap(11).AlignItems(ui.Center).Children(func() {
+					if flying {
+						avatarSlot = ui.Box(c.Key("sender-avatar-slot")).Size(38, 38).Shrink(0)
+					} else {
+						a.messageAvatar(c, m, true)
+					}
+					ui.Column(c).Grow(1).Gap(4).Children(func() {
+						ui.Text(c, name).FontSize(12).Bold()
+						ui.Text(c, address).FontSize(10).TextColor(t.TextMuted).Selectable()
+					})
+					if !m.Date.IsZero() {
+						ui.Text(c, m.Date.Local().Format("02 Jan 2006 · 15:04")).FontSize(10).TextColor(t.TextMuted).Shrink(0)
 					}
 				})
-			})
-		})
-		ui.Row(c).FillWidth().Padding(0, 24, 8, 24).Gap(8).Children(func() {
-			selectInput(c, &a.bodyMode, []string{"Formatted", "Plain text", "Source", "Conversation"}).Label("Message format").Width(160).OnChange(func() { a.previewKey = ""; a.updatePreview() })
-			if m.HTML != "" {
-				label := "Remote images blocked"
-				if a.prefs.RemoteImages {
-					label = "Remote images allowed"
+				a.recipientLine(c, m.ID, "To", m.To)
+				if m.CC != "" {
+					a.recipientLine(c, m.ID, "Cc", m.CC)
 				}
-				ui.Text(c, label).FontSize(9).TextColor(t.TextMuted)
-			}
-		})
+				ui.Row(c).Gap(5).Wrap().Children(func() {
+					if m.Category != "" {
+						ui.Text(c, m.Category).FontSize(10).Padding(4, 7).Radius(4).Background(t.Surface)
+					}
+					for _, tag := range m.Tags {
+						color := a.tagColor(tag)
+						ui.Text(c, tag).FontSize(10).Padding(4, 7).Radius(4).TextColor(color).Background(color.Alpha(.1))
+					}
+					menuButton(c, "+ Tag", func(menu *ui.Menu) {
+						for _, tag := range a.state.Tags {
+							if menu.Item(tag).Chosen() {
+								if slices.Contains(m.Tags, tag) {
+									m.Tags = slices.DeleteFunc(m.Tags, func(v string) bool { return v == tag })
+								} else {
+									m.Tags = append(m.Tags, tag)
+								}
+								a.mutate(m, false)
+							}
+						}
+					})
+				})
+			})
+			ui.Row(c).FillWidth().Padding(0, 24, 8, 24).Gap(8).Children(func() {
+				selectInput(c, &a.bodyMode, []string{"Formatted", "Plain text", "Source", "Conversation"}).Label("Message format").Width(160).OnChange(func() { a.previewKey = ""; a.updatePreview() })
+				if m.HTML != "" {
+					label := "Remote images blocked"
+					if a.prefs.RemoteImages {
+						label = "Remote images allowed"
+					}
+					ui.Text(c, label).FontSize(9).TextColor(t.TextMuted)
+				}
+			})
+		}
 		if a.bodyMode == "Formatted" && a.preview != nil && m.HTML != "" {
+			_, height := c.Size()
+			ui.Scroll(c.Key("reader-header")).Label("Message header").FillWidth().Shrink(0).MaxHeight(height * .4).Children(header)
 			ui.WebView(c, a.preview).Grow(1).FillWidth()
 		} else {
-			ui.Scroll(c).Grow(1).FillWidth().Children(func() {
+			ui.Scroll(c).Label("Message").Grow(1).FillWidth().Children(func() {
+				header()
 				ui.Column(c).FillWidth().Padding(14, 32, 14, 24).Gap(20).Children(func() {
 					if a.bodyMode == "Conversation" {
 						for _, item := range a.conversation(m) {
@@ -722,7 +751,11 @@ func (a *app) reader(c *ui.Context) {
 		if len(m.Attachments) > 0 {
 			ui.Row(c).FillWidth().Padding(12, 24).Gap(7).Wrap().BorderWidth(1, 0, 0, 0).BorderColor(t.Border).Children(func() {
 				for _, at := range m.Attachments {
-					action(c, "attachment", fmt.Sprintf("%s · %s", at.Name, fileSize(len(at.Data))), false, func() { a.previewAttachment(at) }).FontSize(10).ContextMenu(func(menu *ui.Menu) {
+					full := fmt.Sprintf("%s · %s", at.Name, fileSize(len(at.Data)))
+					// Keep the button within the minimum reader width; the size and
+					// the end of the name, where versions differ, stay visible.
+					label := fmt.Sprintf("%s · %s", middleTruncate(at.Name, 36), fileSize(len(at.Data)))
+					action(c, "attachment", label, false, func() { a.previewAttachment(at) }).Label(full).Tooltip(full).FontSize(10).ContextMenu(func(menu *ui.Menu) {
 						if menu.Item("Save attachment").Chosen() {
 							a.saveAttachment(at)
 						}
@@ -741,7 +774,7 @@ func (a *app) reader(c *ui.Context) {
 			action(c, "reply", "Reply all", false, func() { a.newComposer(&m, "replyall") })
 			action(c, "forward", "Forward", false, func() { a.newComposer(&m, "forward") })
 		})
-		if a.prefs.Layout == "Hidden" {
+		if flying {
 			// Paint last so the avatar flies over tags, text, and the native
 			// HTML view instead of disappearing behind the message body.
 			a.messageAvatar(c, m, true).Absolute().AttachTo(avatarSlot, ui.AnchorTopLeft, ui.AnchorTopLeft)
@@ -775,4 +808,28 @@ func (a *app) bulkMenu(menu *ui.Menu) {
 	if menu.Item("Trash selected").Chosen() {
 		a.bulk(func(m *mailclient.Message) { m.Folder = "Trash" }, true)
 	}
+}
+
+// recipientLine shows a long To or Cc list as its first three addresses and
+// a button for the rest, so a mailing list does not bury the message.
+func (a *app) recipientLine(c *ui.Context, messageID, label, list string) {
+	t := a.theme
+	shown, hidden := list, 0
+	if addrs, err := mail.ParseAddressList(list); err == nil && len(addrs) > 3 && a.recipientsOpen != messageID {
+		parts := make([]string, 3)
+		for i, ad := range addrs[:3] {
+			parts[i] = ad.Address
+			if ad.Name != "" {
+				parts[i] = ad.Name + " <" + ad.Address + ">"
+			}
+		}
+		shown, hidden = strings.Join(parts, ", "), len(addrs)-3
+	}
+	ui.Row(c.Key("recipients-" + label)).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, label+": "+shown).FontSize(10).TextColor(t.TextMuted).Selectable().Grow(1).MinWidth(0)
+		if hidden > 0 {
+			textButton(c, fmt.Sprintf("%d more", hidden)).Label(fmt.Sprintf("Show %d more %s recipients", hidden, label)).FontSize(10).
+				AlignSelf(ui.Start).OnClick(func() { a.recipientsOpen = messageID })
+		}
+	})
 }

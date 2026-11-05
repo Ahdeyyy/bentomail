@@ -71,7 +71,7 @@ func (a *app) accountsSettings(c *ui.Context) {
 	section(c, "Connected accounts")
 	for _, ac := range a.state.Accounts {
 		c.Key(ac.ID)
-		frost(ui.Row(c), a.theme.Background).FillWidth().Padding(12).Gap(10).Radius(9).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).Background(insetSurface(a.theme)).FillWidth().Padding(12).Gap(10).Radius(9).AlignItems(ui.Center).Children(func() {
 			ui.Icon(c, icon("mail")).Size(23, 23).TextColor(a.theme.Accent)
 			ui.Column(c).Grow(1).Gap(3).Children(func() {
 				ui.Text(c, ac.Name).FontSize(12).Bold()

@@ -545,7 +545,7 @@ func (a *app) draftsView(c *ui.Context) {
 					}
 					count++
 					c.Key(d.ID)
-					frost(ui.Column(c), a.theme.Background).FillWidth().Padding(16).Gap(8).Radius(9).Children(func() {
+					ui.Column(c).Background(insetSurface(a.theme)).FillWidth().Padding(16).Gap(8).Radius(9).Children(func() {
 						subj := d.Subject
 						if subj == "" {
 							subj = "(No subject)"

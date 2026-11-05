@@ -17,6 +17,28 @@ var logoSVG []byte
 const panelRadius = 12
 const backdropBlurRadius = 32
 
+// The window paints three layers over the desktop material:
+//   - the window base (Theme.Background), under the titlebar and sidebar, is
+//     the only layer the desktop shows through;
+//   - panes (paneSurface) hold mail, the composer and settings. They stay
+//     nearly opaque so text keeps a stable color, and only the flat base is
+//     behind them in-app, so they are not blurred;
+//   - floating surfaces (overlaySurface) are blurred and strongly tinted over
+//     the panes they cover.
+//
+// Controls (Theme.Surface and its states) are always opaque.
+const (
+	baseFrost       = .6  // base opacity lost at full translucency
+	paneFrost       = .12 // pane opacity lost at full translucency
+	overlayMinAlpha = 232
+)
+
+// Strong curves; MyGo's built-in cubic ease-out starts too gently for UI.
+var (
+	easeOut    = ui.CubicBezier(0.23, 1, 0.32, 1)
+	easeDrawer = ui.CubicBezier(0.32, 0.72, 0, 1)
+)
+
 func normalizedTranslucency(value float64) float64 {
 	return mailclient.NormalizeTranslucency(value)
 }
@@ -39,9 +61,10 @@ func workspaceTheme(dark bool, accent string, translucency ...float64) *ui.Theme
 	if dark {
 		t.Dark = true
 		t.Background = ui.Hex("#111521")
-		t.Surface = ui.Hex("#1a2030")
-		t.SurfaceHover = ui.Hex("#252e43")
-		t.SurfacePressed = ui.Hex("#303c59")
+		// Controls sit a step above the #171c2a panes so they keep a visible fill.
+		t.Surface = ui.Hex("#20273a")
+		t.SurfaceHover = ui.Hex("#29324a")
+		t.SurfacePressed = ui.Hex("#323d5b")
 		t.Border = ui.Hex("#2b354b")
 		t.Text = ui.Hex("#e9edf7")
 		t.TextMuted = ui.Hex("#9ba9c3")
@@ -78,27 +101,51 @@ func workspaceTheme(dark bool, accent string, translucency ...float64) *ui.Theme
 	if len(translucency) > 0 {
 		level = normalizedTranslucency(translucency[0])
 	}
-	frost := float32(level / 100)
-	t.Background = t.Background.Alpha(1 - .85*frost)
-	// Controls retain at least 94% opacity, independently of the panes.
-	t.Surface = t.Surface.Alpha(1 - .06*frost)
+	t.Background = t.Background.Alpha(1 - baseFrost*float32(level/100))
 	return t
 }
-func surface(t *ui.Theme) ui.Color {
-	frost := (1 - float32(t.Background.A)/255) / .85
+
+// frostLevel recovers the translucency setting, 0 to 1, from the theme.
+func frostLevel(t *ui.Theme) float32 {
+	return (1 - float32(t.Background.A)/255) / baseFrost
+}
+
+func paneSurface(t *ui.Theme) ui.Color {
 	color := ui.Hex("#ffffff")
 	if t.Dark {
-		color = t.Surface
+		color = ui.Hex("#171c2a")
 	}
-	return color.Alpha(1 - .55*frost)
+	return color.Alpha(1 - paneFrost*frostLevel(t))
 }
 
 // Floating surfaces need a stronger tint as well as blur to keep foreground
 // text readable over both light and dark content at maximum translucency.
 func overlaySurface(t *ui.Theme) ui.Color {
-	color := surface(t)
-	color.A = max(color.A, 204)
+	color := paneSurface(t)
+	color.A = max(color.A, overlayMinAlpha)
 	return color
+}
+
+// insetSurface is an opaque well inside a pane, as for account and draft cards.
+func insetSurface(t *ui.Theme) ui.Color {
+	color := t.Background
+	color.A = 255
+	return color
+}
+
+// Shadows are always black: a Text-colored shadow becomes a glow in dark
+// mode. Dark panes need more weight for the same lift.
+func shadowColor(t *ui.Theme, alpha float32) ui.Color {
+	if t.Dark {
+		alpha = min(1, alpha*2.5)
+	}
+	return ui.RGBA(0, 0, 0, alpha)
+}
+
+// floating gives menus, popups and tooltips the shared overlay material,
+// border and a shadow scaled by how far the surface is lifted.
+func floating(e ui.Element, t *ui.Theme, lift float32) ui.Element {
+	return frost(e, overlaySurface(t)).Border(1, t.Border).Shadow(0, lift, lift*3, 0, shadowColor(t, .14))
 }
 
 // Blur the backdrop, then tint it; text and controls remain sharp above it.
@@ -116,19 +163,22 @@ func frost(e ui.Element, color ui.Color) ui.Element {
 	return e.Background(color)
 }
 func panel(c *ui.Context, e ui.Element) ui.Element {
-	return frost(e, surface(c.Theme())).Radius(panelRadius).Border(1, c.Theme().Border.Alpha(.45)).
-		Shadow(0, 2, 8, 0, c.Theme().Text.Alpha(.04)).Clip().Transition(ui.ElementTransition{
-		Duration: 180 * time.Millisecond, Colors: true, Enter: &ui.Motion{Y: 5},
-	})
+	t := c.Theme()
+	return e.Background(paneSurface(t)).Radius(panelRadius).Border(1, t.Border.Alpha(.45)).
+		Shadow(0, 1, 3, 0, shadowColor(t, .05)).Clip().Transition(paneTransition())
 }
 
 // MyGo honors the desktop's reduced-motion preference for these transitions.
+func paneTransition() ui.ElementTransition {
+	return ui.ElementTransition{Duration: 180 * time.Millisecond, Ease: easeOut, Colors: true, Enter: &ui.Motion{Y: 5}}
+}
+
 func controlTransition() ui.ElementTransition {
-	return ui.ElementTransition{Duration: 140 * time.Millisecond, Colors: true}
+	return ui.ElementTransition{Duration: 140 * time.Millisecond, Ease: easeOut, Colors: true}
 }
 
 func popupTransition() ui.ElementTransition {
-	return ui.ElementTransition{Duration: 160 * time.Millisecond, Colors: true, Enter: &ui.Motion{Y: 4, Scale: .98}}
+	return ui.ElementTransition{Duration: 160 * time.Millisecond, Ease: easeOut, Colors: true, Enter: &ui.Motion{Y: 4, Scale: .97}}
 }
 
 // Keep native split handles and keyboard resizing, with an open gutter between
@@ -162,11 +212,11 @@ func setWindowTheme(c *ui.Context, t *ui.Theme) {
 
 func (a *app) confirmationDialog(c *ui.Context) {
 	ui.DialogBase(c.Key("confirmation"), &a.confirmOpen, func(backdrop, dialog ui.Element) {
-		backdrop.Background(ui.RGBA(0, 0, 0, .22))
-		dialog.Label(a.confirmTitle).Width(440).MaxWidth(560).Padding(24).Gap(18).
-			Radius(panelRadius).Border(1, c.Theme().Border).
-			Shadow(0, 12, 36, 0, ui.RGBA(0, 0, 0, .2))
-		frost(dialog, overlaySurface(c.Theme()))
+		t := c.Theme()
+		backdrop.Background(shadowColor(t, .2)).Transition(ui.ElementTransition{Duration: 200 * time.Millisecond, Ease: easeOut, Enter: &ui.Motion{}})
+		// Modals are not anchored to a trigger, so they scale from the center.
+		floating(dialog, t, 16).Label(a.confirmTitle).Width(440).MaxWidth(560).Padding(24).Gap(18).Radius(panelRadius).
+			Transition(ui.ElementTransition{Duration: 200 * time.Millisecond, Ease: easeOut, Enter: &ui.Motion{Scale: .96}})
 		ui.Text(c, a.confirmTitle).FontSize(18).Bold().FillWidth()
 		ui.Text(c, a.confirmMessage).FontSize(13).LineHeight(1.6).FillWidth().TextColor(c.Theme().TextMuted)
 		ui.Row(c).FillWidth().Justify(ui.End).Gap(8).Children(func() {
@@ -219,8 +269,8 @@ func selectInput(c *ui.Context, selected *string, options []string) ui.Element {
 		ui.Icon(c, icon("dropdown")).Size(12, 12).Shrink(0)
 	})
 	sel.Popup(func(p ui.Element) {
-		frost(p, overlaySurface(t)).Transition(popupTransition()).Margin(t.Space(1), 0, 0, 0).Padding(t.Space(1)).Radius(t.Radius+2).
-			Border(1, t.Border).Shadow(0, 6, 20, 0, ui.RGBA(0, 0, 0, .18))
+		// The popup opens below its trigger; grow it from that edge.
+		floating(p, t, 8).Transition(popupTransition()).TransformOrigin(.5, 0).Margin(t.Space(1), 0, 0, 0).Padding(t.Space(1)).Radius(t.Radius + 2)
 		for _, option := range options {
 			item := sel.Item(option).Padding(t.Space(1.5), t.Space(2.5)).Radius(t.Radius)
 			if item.Highlighted() {
@@ -280,10 +330,9 @@ func sidebarTooltip(c *ui.Context, b ui.Element, label string) {
 	b.Description(label)
 	t := c.Theme()
 	ui.TooltipBase(c, b, func(tip ui.Element) {
-		frost(tip, overlaySurface(t)).Padding(6, 9).Radius(6).Border(1, t.Border).
+		floating(tip, t, 2).Padding(6, 9).Radius(6).
 			TextColor(t.Text).FontSize(11).MaxWidth(280).
 			AttachTo(b, ui.AnchorEnd, ui.AnchorStart).MarginStart(12).
-			Shadow(0, 2, 8, 0, ui.RGBA(0, 0, 0, .2)).
 			Children(func() { ui.Text(c, label) })
 	})
 }

@@ -25,17 +25,20 @@ type mailMenuState struct {
 	actions    []mailMenuAction
 	handles    []ui.Handle
 	reveal     int
+	keyboard   bool // Opened from the keyboard: appears without motion.
+	scroll     ui.ScrollState
 	origin     ui.Handle
 }
 
 // Use a real scroll view rather than the OS menu's scroll-arrow controls.
-func (a *app) openMailMenu(c *ui.Context, m mailclient.Message, x, y float32, origin ui.Handle) {
+func (a *app) openMailMenu(c *ui.Context, m mailclient.Message, x, y float32, origin ui.Handle, keyboard bool) {
 	s := &a.mailMenu
 	s.generation++
 	s.open, s.messageID, s.x, s.y = true, m.ID, x, y
 	s.actions = a.messageMenuActions(m)
 	s.handles = make([]ui.Handle, len(s.actions))
-	s.reveal, s.origin = -1, origin
+	s.reveal, s.origin, s.keyboard = -1, origin, keyboard
+	s.scroll.X, s.scroll.Y = 0, 0
 	s.handles[0].Focus(c)
 }
 
@@ -48,7 +51,7 @@ func (a *app) mailContextTarget(c *ui.Context, row ui.Element, m mailclient.Mess
 		}
 		if ev.Kind == ui.InputPointerUp && secondary {
 			r := h.Bounds(c)
-			a.openMailMenu(c, m, r.X+ev.X, r.Y+ev.Y, a.list.Handle)
+			a.openMailMenu(c, m, r.X+ev.X, r.Y+ev.Y, a.list.Handle, false)
 			return true
 		}
 		return false
@@ -62,16 +65,16 @@ func (a *app) openSelectedMailMenu(c *ui.Context) {
 	}
 	i := max(0, min(a.rowIndex, len(ms)-1))
 	r := a.list.Handle.Bounds(c)
-	a.openMailMenu(c, ms[i], r.X+20, r.Y+16, a.list.Handle)
+	a.openMailMenu(c, ms[i], r.X+20, r.Y+16, a.list.Handle, true)
 }
 
 func (a *app) mailMoreButton(c *ui.Context, m mailclient.Message) {
-	open := func() {
+	open := func(keyboard bool) {
 		r := a.mailMenuTrigger.Bounds(c)
-		a.openMailMenu(c, m, r.X, r.Y+r.H+4, a.mailMenuTrigger)
+		a.openMailMenu(c, m, r.X, r.Y+r.H+4, a.mailMenuTrigger, keyboard)
 	}
-	ui.Button(c, "").Label("More").Bind(&a.mailMenuTrigger).Width(100).OnClick(open).
-		OnShortcut(0, ui.KeyDown, open).Children(func() {
+	ui.Button(c, "").Label("More").Bind(&a.mailMenuTrigger).Width(100).OnClick(func() { open(false) }).
+		OnShortcut(0, ui.KeyDown, func() { open(true) }).Children(func() {
 		ui.Text(c, "More").NoWrap().Shrink(0)
 		ui.Icon(c, icon("dropdown")).Size(12, 12).Shrink(0)
 	})
@@ -111,10 +114,13 @@ func (a *app) mailContextMenu(c *ui.Context) {
 		anchor := ui.Box(c).Absolute().Left(s.x).Top(s.y).Size(1, 1)
 		ui.PopoverBase(c.Key(fmt.Sprintf("email-menu-%d", s.generation)), anchor, &s.open, func(p ui.Element) {
 			t := a.theme
-			frost(p, overlaySurface(t)).Label("Email context menu").Role(ui.RoleMenu).
-				Width(min(328, width-16)).Height(min(menuHeight, 400, height-16)).Padding(6).Radius(panelRadius).
-				Border(1, t.Border).Shadow(0, 8, 24, 0, t.Text.Alpha(.15)).Clip().Transition(popupTransition())
-			ui.Scroll(c).Label("Email menu items").Fill().Padding(0, 10, 0, 0).Children(func() {
+			floating(p, t, 8).Label("Email context menu").Role(ui.RoleMenu).
+				Width(min(328, width-16)).Height(min(menuHeight, 400, height-16)).Padding(6).Radius(panelRadius).Clip()
+			if !s.keyboard {
+				// Grow from the pointer (or the More button) at the top-left corner.
+				p.Transition(popupTransition()).TransformOrigin(0, 0)
+			}
+			ui.Scroll(c).Label("Email menu items").TrackScroll(&s.scroll).Fill().Padding(0, 10, 0, 0).Children(func() {
 				ui.Column(c).FillWidth().Children(func() {
 					for i, action := range s.actions {
 						if action.label == "" {
@@ -123,7 +129,7 @@ func (a *app) mailContextMenu(c *ui.Context) {
 						}
 						b := ui.ButtonBase(c.Key(i)).Bind(&s.handles[i]).Label(action.label).Role(ui.RoleMenuItem).
 							FillWidth().Height(30).Shrink(0).Padding(0, 10).Radius(6).AlignItems(ui.Center).Justify(ui.Start).
-							Disabled(action.disabled).TextColor(t.Text).Transition(controlTransition())
+							Disabled(action.disabled).TextColor(t.Text)
 						if action.disabled {
 							b.TextColor(t.TextMuted)
 						} else if b.Hovered() || b.FocusVisible() {
@@ -145,6 +151,13 @@ func (a *app) mailContextMenu(c *ui.Context) {
 					}
 				})
 			})
+			// More items below: fade the edge so the cut-off row reads as
+			// scrollable content rather than a clipped glitch.
+			if s.scroll.MaxY > 0 && s.scroll.Y < s.scroll.MaxY-1 {
+				bg := overlaySurface(t)
+				ui.Box(c.Key("email-menu-fade")).Absolute().Left(0).Right(0).Bottom(0).Height(36).PassThrough().
+					Gradient(bg.Alpha(0), bg, 180)
+			}
 		})
 	})
 }

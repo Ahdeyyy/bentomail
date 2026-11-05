@@ -144,7 +144,7 @@ func TestTranslucencyControlPersistsAndRestores(t *testing.T) {
 	}
 	tt.Key(0, ui.KeyHome)
 	tt.Frame()
-	if a.prefs.Translucency != 0 || a.theme.Background.A != 255 || surface(a.theme).A != 255 {
+	if a.prefs.Translucency != 0 || a.theme.Background.A != 255 || paneSurface(a.theme).A != 255 {
 		t.Fatalf("opaque endpoint not applied: %v, %+v", a.prefs.Translucency, a.theme)
 	}
 	tt.Key(0, ui.KeyEnd)

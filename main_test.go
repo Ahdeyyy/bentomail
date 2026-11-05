@@ -42,7 +42,7 @@ func seededApp(t *testing.T) *app {
 func TestEmptyWorkspaceAndSetup(t *testing.T) {
 	a := testApp(t)
 	tt := ui.NewTester(a.view, 1440, 900)
-	if !tt.HasText("Select a message") {
+	if !tt.HasText("Nothing to read here") {
 		t.Fatal(tt.Texts())
 	}
 	if err := tt.Click("Add account"); err != nil {

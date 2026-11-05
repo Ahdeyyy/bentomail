@@ -58,8 +58,8 @@ func (a *app) accountSwitcher(c *ui.Context) {
 	}
 	trigger.Children(func() { a.accountAvatar(c, active) })
 	sel.Popup(func(p ui.Element) {
-		frost(p, overlaySurface(t)).Label("Account choices").Width(300).Padding(6).Margin(8, 0, 0, 0).Radius(panelRadius).Border(1, t.Border).
-			Shadow(0, 8, 24, 0, t.Text.Alpha(.12)).Transition(popupTransition())
+		floating(p, t, 8).Label("Account choices").Width(300).Padding(6).Margin(8, 0, 0, 0).Radius(panelRadius).
+			Transition(popupTransition())
 		ui.Text(c, "Switch account").FontSize(10).TextColor(t.TextMuted).Padding(8, 9)
 		ui.Scroll(c).FillWidth().MaxHeight(360).Children(func() {
 			ui.Column(c).FillWidth().Gap(3).Children(func() {

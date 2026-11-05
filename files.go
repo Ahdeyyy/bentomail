@@ -22,6 +22,18 @@ func fileSize(n int) string {
 	}
 	return fmt.Sprintf("%.1f MB", float64(n)/(1024*1024))
 }
+
+// middleTruncate shortens s to at most n runes by eliding its middle. File
+// names differ at the end ("…-v11.pdf", "…-v12.pdf"), so the end is kept.
+func middleTruncate(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n || n < 3 {
+		return s
+	}
+	tail := (n - 1) / 2
+	return string(r[:n-1-tail]) + "…" + string(r[len(r)-tail:])
+}
+
 func safeName(s string) string {
 	s = filepath.Base(strings.ReplaceAll(s, "\\", "/"))
 	s = strings.Map(func(r rune) rune {
